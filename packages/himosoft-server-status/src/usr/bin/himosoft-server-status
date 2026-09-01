@@ -78,14 +78,23 @@ cmd_run() {
     exit 1
   fi
 
+  if [[ ! -f "${DASHBOARD}" ]]; then
+    echo "Dashboard not found: ${DASHBOARD}" >&2
+    exit 1
+  fi
+
   local interval="${interval_override:-$(load_interval)}"
 
   if [[ -z "${interval}" ]]; then
-    # shellcheck source=/dev/null
-    source /usr/share/himosoft/lib/interactive.sh
-    hs_prompt REFRESH_INTERVAL "Enter refresh interval in seconds"
-    [[ -n "${REFRESH_INTERVAL}" ]] || exit 1
-    interval="${REFRESH_INTERVAL}"
+    if [[ ! -t 0 ]]; then
+      interval="2"
+    else
+      # shellcheck source=/dev/null
+      source /usr/share/himosoft/lib/interactive.sh
+      hs_prompt REFRESH_INTERVAL "Enter refresh interval in seconds"
+      [[ -n "${REFRESH_INTERVAL}" ]] || exit 1
+      interval="${REFRESH_INTERVAL}"
+    fi
   fi
 
   exec python3 "${DASHBOARD}" --interval "${interval}"
@@ -93,7 +102,10 @@ cmd_run() {
 
 main() {
   case "${1:-run}" in
-    run) shift; cmd_run "$@" ;;
+    run)
+      [[ $# -gt 0 ]] && shift
+      cmd_run "$@"
+      ;;
     configure) cmd_configure ;;
     help|-h|--help) usage ;;
     *) usage; exit 1 ;;

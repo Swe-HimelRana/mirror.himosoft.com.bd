@@ -491,47 +491,63 @@ def render_dashboard(
 
 
 def main() -> int:
+    if not sys.stdout.isatty():
+        print(
+            "himosoft-server-status requires an interactive terminal (TTY).\n"
+            "Connect with: ssh -t user@host",
+            file=sys.stderr,
+        )
+        return 1
+
     parser = argparse.ArgumentParser(description="Himosoft Server Status dashboard")
     parser.add_argument("--interval", type=float, default=2.0, help="Refresh interval in seconds")
     args = parser.parse_args()
 
     interval = max(0.5, args.interval)
 
-    prev_cpu = read_cpu()
-    prev_net = read_net()
-    prev_t = time.time()
-    overall_cpu = 0.0
-    per_cpu: List[float] = []
-    rx_rate = tx_rate = 0.0
+    try:
+        prev_cpu = read_cpu()
+        prev_net = read_net()
+        prev_t = time.time()
+        overall_cpu = 0.0
+        per_cpu: List[float] = []
+        rx_rate = tx_rate = 0.0
 
-    # Prime first sample
-    time.sleep(0.3)
-    cur_cpu = read_cpu()
-    overall_cpu, per_cpu = cpu_usage(prev_cpu, cur_cpu)
-    prev_cpu = cur_cpu
+        time.sleep(0.3)
+        cur_cpu = read_cpu()
+        overall_cpu, per_cpu = cpu_usage(prev_cpu, cur_cpu)
+        prev_cpu = cur_cpu
 
-    with Live(console=console, refresh_per_second=min(10, 1.0 / interval), screen=True) as live:
-        while running:
-            now = time.time()
-            dt = now - prev_t
-            cur_cpu = read_cpu()
-            cur_net = read_net()
-            overall_cpu, per_cpu = cpu_usage(prev_cpu, cur_cpu)
-            rx_rate, tx_rate = net_rate(prev_net, cur_net, dt)
-            prev_cpu, prev_net, prev_t = cur_cpu, cur_net, now
+        use_screen = sys.stdout.isatty()
+        with Live(
+            console=console,
+            refresh_per_second=max(1, min(10, int(1.0 / interval))),
+            screen=use_screen,
+        ) as live:
+            while running:
+                now = time.time()
+                dt = now - prev_t
+                cur_cpu = read_cpu()
+                cur_net = read_net()
+                overall_cpu, per_cpu = cpu_usage(prev_cpu, cur_cpu)
+                rx_rate, tx_rate = net_rate(prev_net, cur_net, dt)
+                prev_cpu, prev_net, prev_t = cur_cpu, cur_net, now
 
-            mem = read_meminfo()
-            disks = read_disks()
+                mem = read_meminfo()
+                disks = read_disks()
 
-            live.update(
-                render_dashboard(interval, overall_cpu, per_cpu, mem, disks, rx_rate, tx_rate)
-            )
+                live.update(
+                    render_dashboard(interval, overall_cpu, per_cpu, mem, disks, rx_rate, tx_rate)
+                )
+                time.sleep(interval)
 
-            # Check for q key non-blocking is complex in rich Live; Ctrl+C works
-            time.sleep(interval)
+        if use_screen:
+            console.clear()
+        console.print("[dim]Dashboard stopped.[/dim]")
+    except Exception as exc:
+        print(f"himosoft-server-status error: {exc}", file=sys.stderr)
+        return 1
 
-    console.clear()
-    console.print("[dim]Dashboard stopped.[/dim]")
     return 0
 
 
