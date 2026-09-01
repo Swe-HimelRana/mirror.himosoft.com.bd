@@ -21,4 +21,6 @@ cd site && python3 -m http.server 8765
 
 1. Copy `packages/himosoft-k3s-server/` as a template
 2. Register in `packages/manifest.json`
-3. Push to `main` — GitHub Actions builds all `.deb` files and publishes to Pages
+3. Push to `main` — GitHub Actions builds all `.deb` files, signs `Release`, and publishes to Pages
+
+APT signing requires GitHub secrets — see [gpg-signing.md](gpg-signing.md).

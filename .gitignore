@@ -1,2 +1,5 @@
 site/
 packages/*/build/
+
+# GPG private keys — never commit (public .pub is OK)
+keys/*.key

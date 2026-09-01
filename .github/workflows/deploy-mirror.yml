@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y dpkg-dev apt-utils
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev apt-utils gnupg
 
       - name: Build Debian packages
         run: |
@@ -39,6 +39,9 @@ jobs:
           ./scripts/build-all.sh
 
       - name: Assemble site, APT repo, and packages.json
+        env:
+          APT_REPO_GPG_PRIVATE_KEY: ${{ secrets.APT_REPO_GPG_PRIVATE_KEY }}
+          APT_REPO_GPG_PASSPHRASE: ${{ secrets.APT_REPO_GPG_PASSPHRASE }}
         run: ./scripts/publish-apt-repo.sh
 
       - name: Upload Pages artifact

@@ -49,6 +49,10 @@ gzip -9 -c "${DIST}/binary-amd64/Packages" > "${DIST}/binary-amd64/Packages.gz"
 echo "==> Generating Release (with checksums)"
 apt-ftparchive -c="${ROOT}/scripts/apt-ftparchive.conf" release dists/stable > dists/stable/Release
 
+echo "==> Signing Release (Release.gpg + himosoft.gpg)"
+chmod +x "${ROOT}/scripts/sign-apt-release.sh"
+"${ROOT}/scripts/sign-apt-release.sh" "${SITE}"
+
 echo "==> Generating packages.json"
 python3 "${ROOT}/scripts/generate-packages-json.py" "${SITE}"
 
@@ -58,4 +62,6 @@ echo "  packages.json"
 echo "  dists/stable/main/binary-all/Packages.gz"
 echo "  dists/stable/main/binary-amd64/Packages.gz"
 echo "  dists/stable/Release"
+echo "  dists/stable/Release.gpg"
+echo "  himosoft.gpg"
 find "${POOL}" -name '*.deb' | head -20
