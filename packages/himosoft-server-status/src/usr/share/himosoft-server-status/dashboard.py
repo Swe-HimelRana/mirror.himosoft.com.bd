@@ -16,6 +16,7 @@ import termios
 import threading
 import time
 import tty
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -77,6 +78,8 @@ class ProcessRow:
     mem: str
     swap_kb: int
     cmd: str
+    cpu_f: float = 0.0
+    mem_f: float = 0.0
 
 
 @dataclass
@@ -84,6 +87,53 @@ class CertInfo:
     name: str
     expires: str
     days_left: int
+
+
+@dataclass
+class PodRow:
+    namespace: str
+    name: str
+    status: str
+    cpu: str
+    memory: str
+    cpu_sort: float = 0.0
+    mem_sort: float = 0.0
+
+
+@dataclass
+class K3sSnapshot:
+    summary: str = "—"
+    crashloops: int = 0
+    pods: List[PodRow] = field(default_factory=list)
+    metrics_available: bool = False
+
+
+@dataclass
+class ServicesSnapshot:
+    k3s_state: str = "n/a"
+    docker_state: str = "n/a"
+    ufw_state: str = "n/a"
+    node_exporter_state: str = "n/a"
+    k3s_summary: str = "—"
+    docker_containers: str = "—"
+    k3s_crashloops: int = 0
+    k3s_pods: List[PodRow] = field(default_factory=list)
+    k3s_metrics_available: bool = False
+
+
+@dataclass
+class SlowMetrics:
+    failed_units: List[str] = field(default_factory=list)
+    zombies: int = 0
+    crashloops: int = 0
+    certs: List[CertInfo] = field(default_factory=list)
+    top_cpu: List[ProcessRow] = field(default_factory=list)
+    top_mem: List[ProcessRow] = field(default_factory=list)
+    services: ServicesSnapshot = field(default_factory=ServicesSnapshot)
+    k3s_pods: List[PodRow] = field(default_factory=list)
+    k3s_metrics_available: bool = False
+    temps: List[Tuple[str, float]] = field(default_factory=list)
+    disks: List[Tuple[str, str, str, str, str]] = field(default_factory=list)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
@@ -383,26 +433,52 @@ def read_proc_swap_kb(pid: str) -> int:
     return 0
 
 
-def read_top_processes(sort_by: str = "cpu", limit: int = 6) -> List[ProcessRow]:
-    sort_key = "pcpu" if sort_by == "cpu" else "pmem"
-    out = run_quiet(["ps", "-eo", "pid,user,pcpu,pmem,comm", f"--sort=-{sort_key}"])
+def read_processes_snapshot() -> Tuple[List[ProcessRow], int]:
+    """Single ps call for process list + zombie count (avoids repeated ps spawns)."""
+    out = run_quiet(["ps", "-eo", "pid,user,pcpu,pmem,stat,comm", "--no-headers"])
     if not out:
-        return []
+        return [], 0
     rows: List[ProcessRow] = []
-    for line in out.splitlines()[1 : limit + 1]:
-        parts = line.split(None, 4)
-        if len(parts) < 5:
+    zombies = 0
+    for line in out.splitlines():
+        parts = line.split(None, 5)
+        if len(parts) < 6:
             continue
-        pid, user, cpu, mem, cmd = parts
-        rows.append(ProcessRow(pid, user, cpu, mem, read_proc_swap_kb(pid), cmd[:36]))
-    return rows
+        pid, user, cpu, mem, stat, cmd = parts
+        if "Z" in stat:
+            zombies += 1
+        try:
+            cpu_f, mem_f = float(cpu), float(mem)
+        except ValueError:
+            continue
+        rows.append(ProcessRow(pid, user, cpu, mem, 0, cmd[:36], cpu_f, mem_f))
+    return rows, zombies
+
+
+def _attach_swap(rows: List[ProcessRow], limit: int = 5) -> List[ProcessRow]:
+    out: List[ProcessRow] = []
+    for row in rows[:limit]:
+        out.append(ProcessRow(
+            row.pid, row.user, row.cpu, row.mem,
+            read_proc_swap_kb(row.pid), row.cmd, row.cpu_f, row.mem_f,
+        ))
+    return out
+
+
+def top_processes(rows: List[ProcessRow], sort_by: str, limit: int = 5) -> List[ProcessRow]:
+    key = "cpu_f" if sort_by == "cpu" else "mem_f"
+    ranked = sorted(rows, key=lambda r: getattr(r, key, 0.0), reverse=True)
+    return _attach_swap(ranked, limit)
 
 
 def zombie_count() -> int:
-    out = run_quiet(["ps", "-eo", "stat"])
-    if not out:
-        return 0
-    return sum(1 for line in out.splitlines()[1:] if "Z" in line.split()[0])
+    _, zombies = read_processes_snapshot()
+    return zombies
+
+
+def read_top_processes(sort_by: str = "cpu", limit: int = 6) -> List[ProcessRow]:
+    rows, _ = read_processes_snapshot()
+    return top_processes(rows, sort_by, limit)
 
 
 def failed_systemd_units() -> List[str]:
@@ -433,6 +509,112 @@ def status_style(state: str) -> str:
     return "dim"
 
 
+def parse_k8s_cpu(value: str) -> float:
+    value = value.strip()
+    if not value or value in ("<unknown>", "—"):
+        return 0.0
+    if value.endswith("m"):
+        return float(value[:-1]) / 1000.0
+    return float(value)
+
+
+def parse_k8s_memory(value: str) -> float:
+    value = value.strip()
+    if not value or value in ("<unknown>", "—"):
+        return 0.0
+    binary = {"Ki": 1024, "Mi": 1024**2, "Gi": 1024**3, "Ti": 1024**4}
+    for suffix, mult in binary.items():
+        if value.endswith(suffix):
+            return float(value[: -len(suffix)]) * mult
+    decimal = {"K": 1000, "M": 1000**2, "G": 1000**3}
+    for suffix, mult in decimal.items():
+        if value.endswith(suffix):
+            return float(value[: -len(suffix)]) * mult
+    try:
+        return float(value)
+    except ValueError:
+        return 0.0
+
+
+def _kubectl(args: List[str]) -> str:
+    return run_quiet(["k3s", "kubectl", *args])
+
+
+def collect_k3s_metrics(pod_limit: int = 8) -> K3sSnapshot:
+    """Nodes, pod counts, crashloops, and pod CPU/RAM via kubectl top."""
+    snap = K3sSnapshot()
+    if service_state("k3s") != "active":
+        return snap
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        nodes_f = pool.submit(_kubectl, ["get", "nodes", "--no-headers"])
+        pods_f = pool.submit(_kubectl, ["get", "pods", "-A", "--no-headers"])
+        top_f = pool.submit(_kubectl, ["top", "pods", "-A", "--no-headers"])
+
+    nodes = nodes_f.result()
+    pods_out = pods_f.result()
+    top_out = top_f.result()
+
+    n_nodes = len(nodes.splitlines()) if nodes else 0
+    pod_lines = pods_out.splitlines() if pods_out else []
+    snap.summary = f"{n_nodes} node(s) · {len(pod_lines)} pods"
+    snap.crashloops = sum(1 for line in pod_lines if "CrashLoopBackOff" in line)
+
+    status_map: Dict[Tuple[str, str], str] = {}
+    for line in pod_lines:
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        ns, name, status = parts[0], parts[1], parts[3]
+        status_map[(ns, name)] = status
+
+    top_rows: List[PodRow] = []
+    if top_out:
+        snap.metrics_available = True
+        for line in top_out.splitlines():
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            ns, name, cpu, mem = parts[0], parts[1], parts[2], parts[3]
+            top_rows.append(PodRow(
+                namespace=ns,
+                name=name[:28],
+                status=status_map.get((ns, name), "Running"),
+                cpu=cpu,
+                memory=mem,
+                cpu_sort=parse_k8s_cpu(cpu),
+                mem_sort=parse_k8s_memory(mem),
+            ))
+        top_rows.sort(key=lambda p: p.cpu_sort + p.mem_sort / (1024 * 1024), reverse=True)
+        snap.pods = top_rows[:pod_limit]
+        return snap
+
+    # metrics-server unavailable — list running pods without usage
+    running = []
+    for line in pod_lines:
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        ns, name, status = parts[0], parts[1], parts[3]
+        if status != "Running":
+            continue
+        running.append(PodRow(
+            namespace=ns,
+            name=name[:28],
+            status=status,
+            cpu="—",
+            memory="—",
+        ))
+    snap.pods = running[:pod_limit]
+    return snap
+
+
+def k3s_pod_stats() -> Tuple[str, int]:
+    """Single kubectl pods call for summary + CrashLoopBackOff count."""
+    k3s = collect_k3s_metrics(pod_limit=0)
+    return k3s.summary, k3s.crashloops
+
+
 def docker_container_count() -> str:
     if service_state("docker") != "active":
         return "—"
@@ -440,23 +622,40 @@ def docker_container_count() -> str:
     return f"{len(out.splitlines())} running" if out else "0 running"
 
 
+def collect_services_snapshot() -> ServicesSnapshot:
+    snap = ServicesSnapshot()
+    units = ["k3s", "docker", "ufw", "prometheus-node-exporter"]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        states = list(pool.map(service_state, units))
+    snap.k3s_state, snap.docker_state, snap.ufw_state, snap.node_exporter_state = states
+
+    def docker_detail() -> str:
+        if snap.docker_state != "active":
+            return "—"
+        out = run_quiet(["docker", "ps", "-q"])
+        return f"{len(out.splitlines())} running" if out else "0 running"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        k3s_f = pool.submit(collect_k3s_metrics, 8)
+        docker_f = pool.submit(docker_detail)
+        k3s = k3s_f.result()
+        snap.docker_containers = docker_f.result()
+
+    snap.k3s_summary = k3s.summary
+    snap.k3s_crashloops = k3s.crashloops
+    snap.k3s_pods = k3s.pods
+    snap.k3s_metrics_available = k3s.metrics_available
+    return snap
+
+
 def k3s_summary() -> str:
-    if service_state("k3s") != "active":
-        return "—"
-    nodes = run_quiet(["k3s", "kubectl", "get", "nodes", "--no-headers"])
-    pods = run_quiet(["k3s", "kubectl", "get", "pods", "-A", "--no-headers"])
-    n = len(nodes.splitlines()) if nodes else 0
-    p = len(pods.splitlines()) if pods else 0
-    return f"{n} node(s) · {p} pods"
+    summary, _ = k3s_pod_stats()
+    return summary
 
 
 def k3s_crashloop_count() -> int:
-    if service_state("k3s") != "active":
-        return 0
-    out = run_quiet(["k3s", "kubectl", "get", "pods", "-A", "--no-headers"])
-    if not out:
-        return 0
-    return sum(1 for line in out.splitlines() if "CrashLoopBackOff" in line)
+    _, crashloops = k3s_pod_stats()
+    return crashloops
 
 
 # ── TLS certificates ─────────────────────────────────────────────────────
@@ -644,19 +843,19 @@ def build_network_panel(rx_rate: float, tx_rate: float, ifaces: List[Tuple[str, 
     return Panel(t, title="[bold]Network[/bold]", border_style="blue", box=box.ROUNDED)
 
 
-def build_services_panel() -> Panel:
-    services = [
-        ("k3s", "K3s", k3s_summary()),
-        ("docker", "Docker", docker_container_count()),
-        ("ufw", "Firewall", ""),
-        ("prometheus-node-exporter", "Node exporter", ""),
+def build_services_panel(services: ServicesSnapshot) -> Panel:
+    rows = [
+        ("K3s", services.k3s_state, services.k3s_summary),
+        ("Docker", services.docker_state, services.docker_containers),
+        ("Firewall", services.ufw_state, ""),
+        ("Node exporter", services.node_exporter_state, ""),
     ]
     t = Table(show_header=False, box=None, padding=(0, 1), expand=True)
     t.add_column("Service")
     t.add_column("State")
     t.add_column("Detail", justify="right", style="dim")
-    for unit, label, detail in services:
-        t.add_row(label, Text(service_state(unit), style=status_style(service_state(unit))), detail)
+    for label, state, detail in rows:
+        t.add_row(label, Text(state, style=status_style(state)), detail)
     return Panel(t, title="[bold]Services[/bold]", border_style="white", box=box.ROUNDED)
 
 
@@ -673,7 +872,43 @@ def build_certs_panel(certs: List[CertInfo]) -> Panel:
     return Panel(t, title="[bold]TLS certs[/bold]", border_style="cyan", box=box.ROUNDED)
 
 
-def build_process_table(title: str, sort_by: str, border: str) -> Panel:
+def build_k3s_pods_panel(
+    pods: List[PodRow], k3s_active: bool, metrics_available: bool,
+) -> Panel:
+    t = Table(show_header=True, box=box.SIMPLE_HEAD, expand=True, padding=(0, 1))
+    t.add_column("Namespace", style="cyan", width=12)
+    t.add_column("Pod", width=20)
+    t.add_column("Status", width=10)
+    t.add_column("CPU", justify="right", width=8)
+    t.add_column("RAM", justify="right", width=8)
+
+    if not k3s_active:
+        t.add_row("—", "K3s not running", "", "", "")
+        title = "[bold]K3s pods[/bold]"
+    elif not pods:
+        t.add_row("—", "no pods found", "", "", "")
+        title = "[bold]K3s pods[/bold]"
+    else:
+        for pod in pods:
+            status_style = "green" if pod.status == "Running" else (
+                "red" if pod.status in ("CrashLoopBackOff", "Error", "Failed") else "yellow"
+            )
+            cpu_style = "bold red" if pod.cpu_sort >= 0.5 else ""
+            mem_style = "bold red" if pod.mem_sort >= 512 * 1024 * 1024 else ""
+            t.add_row(
+                pod.namespace[:12],
+                pod.name,
+                Text(pod.status, style=status_style),
+                Text(pod.cpu, style=cpu_style),
+                Text(pod.memory, style=mem_style),
+            )
+        hint = "kubectl top" if metrics_available else "metrics-server n/a"
+        title = f"[bold]K3s pods[/bold] [dim]({hint})[/dim]"
+
+    return Panel(t, title=title, border_style="bright_blue", box=box.ROUNDED)
+
+
+def build_process_table(title: str, processes: List[ProcessRow], sort_by: str, border: str) -> Panel:
     t = Table(show_header=True, box=box.SIMPLE_HEAD, expand=True, padding=(0, 1))
     t.add_column("PID", style="bold cyan", width=8)
     t.add_column("User", width=8)
@@ -681,8 +916,8 @@ def build_process_table(title: str, sort_by: str, border: str) -> Panel:
     t.add_column("MEM%", justify="right", width=6)
     t.add_column("Swap", justify="right", width=7)
     t.add_column("Application")
-    for proc in read_top_processes(sort_by, 5):
-        cpu_f, mem_f = float(proc.cpu), float(proc.mem)
+    for proc in processes:
+        cpu_f, mem_f = proc.cpu_f, proc.mem_f
         swap_txt = kb_human(proc.swap_kb) if proc.swap_kb else "—"
         t.add_row(
             proc.pid, proc.user,
@@ -697,25 +932,21 @@ def build_process_table(title: str, sort_by: str, border: str) -> Panel:
 def render_dashboard(
     interval: float,
     sysinfo: Dict[str, str],
-    temps: List[Tuple[str, float]],
+    slow: SlowMetrics,
     overall_cpu: float,
     per_cpu: List[float],
     mem: Dict[str, int],
-    disks: List[Tuple[str, ...]],
     disk_io: List[Tuple[str, float, float]],
     rx_rate: float,
     tx_rate: float,
     ifaces: List[Tuple[str, float, float]],
-    failed: List[str],
-    zombies: int,
-    crashloops: int,
-    certs: List[CertInfo],
 ) -> Layout:
     layout = Layout()
     layout.split_column(
         Layout(name="header", size=8),
         Layout(name="alerts", size=5),
         Layout(name="body"),
+        Layout(name="k3s_pods", size=9),
         Layout(name="processes", size=10),
         Layout(name="footer", size=3),
     )
@@ -733,17 +964,24 @@ def render_dashboard(
     )
     layout["processes"].split_row(Layout(name="top_cpu", ratio=1), Layout(name="top_mem", ratio=1))
 
-    layout["header"].update(build_header(interval, sysinfo, temps))
-    layout["alerts"].update(build_alerts_panel(failed, zombies, crashloops, certs))
+    layout["header"].update(build_header(interval, sysinfo, slow.temps))
+    layout["alerts"].update(build_alerts_panel(
+        slow.failed_units, slow.zombies, slow.crashloops, slow.certs,
+    ))
     layout["cpu"].update(build_cpu_panel(overall_cpu, per_cpu))
     layout["mem"].update(build_memory_panel(mem))
-    layout["disk"].update(build_disk_panel(disks))
+    layout["disk"].update(build_disk_panel(slow.disks))
     layout["diskio"].update(build_disk_io_panel(disk_io))
     layout["net"].update(build_network_panel(rx_rate, tx_rate, ifaces))
-    layout["svc"].update(build_services_panel())
-    layout["certs"].update(build_certs_panel(certs))
-    layout["processes"]["top_cpu"].update(build_process_table("Apps", "cpu", "red"))
-    layout["processes"]["top_mem"].update(build_process_table("Apps", "mem", "blue"))
+    layout["svc"].update(build_services_panel(slow.services))
+    layout["certs"].update(build_certs_panel(slow.certs))
+    layout["k3s_pods"].update(build_k3s_pods_panel(
+        slow.k3s_pods,
+        slow.services.k3s_state == "active",
+        slow.k3s_metrics_available,
+    ))
+    layout["processes"]["top_cpu"].update(build_process_table("Apps", slow.top_cpu, "cpu", "red"))
+    layout["processes"]["top_mem"].update(build_process_table("Apps", slow.top_mem, "mem", "blue"))
 
     ts = time.strftime("%H:%M:%S")
     layout["footer"].update(Panel(
@@ -751,6 +989,134 @@ def render_dashboard(
         box=box.ROUNDED, border_style="dim",
     ))
     return layout
+
+
+# ── background collector & splash ───────────────────────────────────────
+
+
+SLOW_REFRESH_SEC = 5.0
+CERT_REFRESH_SEC = 60.0
+SPLASH_MIN_SEC = 0.8
+
+
+def collect_slow_metrics(include_certs: bool = True, process_limit: int = 5) -> SlowMetrics:
+    """Gather expensive metrics in parallel (subprocess / glob / ps)."""
+    slow = SlowMetrics()
+
+    def processes_job() -> Tuple[List[ProcessRow], int]:
+        rows, zombies = read_processes_snapshot()
+        return rows, zombies
+
+    jobs: Dict[str, Any] = {
+        "failed": failed_systemd_units,
+        "processes": processes_job,
+        "services": collect_services_snapshot,
+        "disks": read_disks,
+        "temps": read_cpu_temps,
+    }
+    if include_certs:
+        jobs["certs"] = find_tls_certs
+
+    results: Dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=min(8, len(jobs))) as pool:
+        futures = {pool.submit(fn): name for name, fn in jobs.items()}
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
+
+    slow.failed_units = results.get("failed", [])
+    proc_rows, slow.zombies = results.get("processes", ([], 0))
+    slow.top_cpu = top_processes(proc_rows, "cpu", process_limit)
+    slow.top_mem = top_processes(proc_rows, "mem", process_limit)
+    slow.services = results.get("services", ServicesSnapshot())
+    slow.disks = results.get("disks", [])
+    slow.temps = results.get("temps", [])
+    slow.crashloops = slow.services.k3s_crashloops
+    slow.k3s_pods = list(slow.services.k3s_pods)
+    slow.k3s_metrics_available = slow.services.k3s_metrics_available
+    if include_certs:
+        slow.certs = results.get("certs", [])
+    return slow
+
+
+class BackgroundCollector:
+    """Refreshes slow metrics on a background thread so the UI loop stays light."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._metrics = SlowMetrics()
+        self._ready = threading.Event()
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._last_cert_refresh = 0.0
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, name="hs-status-collector", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2.0)
+
+    def wait_ready(self, timeout: float = 30.0) -> bool:
+        return self._ready.wait(timeout=timeout)
+
+    def snapshot(self) -> SlowMetrics:
+        with self._lock:
+            return SlowMetrics(
+                failed_units=list(self._metrics.failed_units),
+                zombies=self._metrics.zombies,
+                crashloops=self._metrics.crashloops,
+                certs=list(self._metrics.certs),
+                top_cpu=list(self._metrics.top_cpu),
+                top_mem=list(self._metrics.top_mem),
+                services=self._metrics.services,
+                k3s_pods=list(self._metrics.k3s_pods),
+                k3s_metrics_available=self._metrics.k3s_metrics_available,
+                temps=list(self._metrics.temps),
+                disks=list(self._metrics.disks),
+            )
+
+    def _store(self, metrics: SlowMetrics) -> None:
+        with self._lock:
+            self._metrics = metrics
+
+    def _run(self) -> None:
+        self._store(collect_slow_metrics(include_certs=True))
+        self._last_cert_refresh = time.time()
+        self._ready.set()
+        next_refresh = time.time() + SLOW_REFRESH_SEC
+        while not self._stop.is_set():
+            now = time.time()
+            if now >= next_refresh:
+                include_certs = (now - self._last_cert_refresh) >= CERT_REFRESH_SEC
+                updated = collect_slow_metrics(include_certs=include_certs)
+                if not include_certs:
+                    updated.certs = self.snapshot().certs
+                self._store(updated)
+                if include_certs:
+                    self._last_cert_refresh = now
+                next_refresh = now + SLOW_REFRESH_SEC
+            time.sleep(0.25)
+
+
+def show_splash(message: str = "Loading metrics…") -> None:
+    console.clear()
+    body = Text()
+    body.append("\n\n", style="")
+    body.append("HimoSoft Server Status\n\n", style="bold cyan")
+    body.append("A tool developed by HimoSoft for monitoring server load\n\n", style="dim")
+    body.append("www.himosoft.com.bd\n\n", style="bold link https://www.himosoft.com.bd")
+    body.append(f"{message}\n", style="dim italic")
+    width = min(console.width or 72, 72)
+    splash = Panel(
+        Align.center(body),
+        border_style="cyan",
+        box=box.DOUBLE,
+        padding=(1, 6),
+        width=width,
+    )
+    console.print(Align.center(splash))
 
 
 # ── keyboard listener ────────────────────────────────────────────────────
@@ -794,43 +1160,55 @@ def collect_snapshot() -> Dict[str, Any]:
     avail = mem.get("MemAvailable", mem.get("MemFree", 0))
     swap_total = mem.get("SwapTotal", 0)
     swap_free = mem.get("SwapFree", 0)
-    certs = find_tls_certs()
-    failed = failed_systemd_units()
-    crashloops = k3s_crashloop_count()
+
+    slow = collect_slow_metrics(include_certs=True, process_limit=10)
+    svc = slow.services
+
     return {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "system": sysinfo,
         "uptimeSeconds": read_uptime(),
         "loadavg": list(read_loadavg()),
-        "temperatures": [{"zone": z, "celsius": t} for z, t in read_cpu_temps()],
+        "temperatures": [{"zone": z, "celsius": t} for z, t in slow.temps],
         "memory": {
             "totalKb": total, "usedKb": total - avail, "availableKb": avail,
             "swapTotalKb": swap_total, "swapUsedKb": swap_total - swap_free,
         },
-        "disks": [{"mount": r[0], "size": r[1], "used": r[2], "free": r[3], "percent": r[4]} for r in read_disks()],
+        "disks": [{"mount": r[0], "size": r[1], "used": r[2], "free": r[3], "percent": r[4]} for r in slow.disks],
         "alerts": {
-            "failedSystemdUnits": failed,
-            "zombieProcesses": zombie_count(),
-            "k3sCrashLoopBackOff": crashloops,
+            "failedSystemdUnits": slow.failed_units,
+            "zombieProcesses": slow.zombies,
+            "k3sCrashLoopBackOff": slow.crashloops,
         },
         "tlsCertificates": [
-            {"name": c.name, "expires": c.expires, "daysLeft": c.days_left} for c in certs
+            {"name": c.name, "expires": c.expires, "daysLeft": c.days_left} for c in slow.certs
         ],
         "services": {
-            "k3s": service_state("k3s"),
-            "docker": service_state("docker"),
-            "ufw": service_state("ufw"),
-            "nodeExporter": service_state("prometheus-node-exporter"),
-            "k3sSummary": k3s_summary(),
-            "dockerContainers": docker_container_count(),
+            "k3s": svc.k3s_state,
+            "docker": svc.docker_state,
+            "ufw": svc.ufw_state,
+            "nodeExporter": svc.node_exporter_state,
+            "k3sSummary": svc.k3s_summary,
+            "dockerContainers": svc.docker_containers,
         },
+        "k3sPods": [
+            {
+                "namespace": p.namespace,
+                "name": p.name,
+                "status": p.status,
+                "cpu": p.cpu,
+                "memory": p.memory,
+            }
+            for p in slow.k3s_pods
+        ],
+        "k3sMetricsAvailable": slow.k3s_metrics_available,
         "topProcessesByCpu": [
             {"pid": p.pid, "user": p.user, "cpu": p.cpu, "mem": p.mem, "swapKb": p.swap_kb, "command": p.cmd}
-            for p in read_top_processes("cpu", 10)
+            for p in slow.top_cpu
         ],
         "topProcessesByMem": [
             {"pid": p.pid, "user": p.user, "cpu": p.cpu, "mem": p.mem, "swapKb": p.swap_kb, "command": p.cmd}
-            for p in read_top_processes("mem", 10)
+            for p in slow.top_mem
         ],
     }
 
@@ -843,21 +1221,42 @@ def run_snapshot() -> int:
 def run_live(interval: float) -> int:
     global running
     running = True
+    use_screen = sys.stdout.isatty()
+
+    show_splash("Collecting system metrics…")
+    splash_start = time.time()
+
+    collector = BackgroundCollector()
+    collector.start()
+
     sysinfo = read_system_info()
     prev_cpu = read_cpu()
     prev_net = read_net()
     prev_disk_io = read_disk_io()
     prev_t = time.time()
 
+    # Warm up rate counters while slow metrics load in background
     time.sleep(0.3)
     cur_cpu = read_cpu()
     overall_cpu, per_cpu = cpu_usage(prev_cpu, cur_cpu)
     prev_cpu = cur_cpu
 
-    start_keyboard_listener()
-    use_screen = sys.stdout.isatty()
+    collector.wait_ready(timeout=30.0)
+    elapsed = time.time() - splash_start
+    if elapsed < SPLASH_MIN_SEC:
+        show_splash("Starting dashboard…")
+        time.sleep(SPLASH_MIN_SEC - elapsed)
 
-    with Live(console=console, refresh_per_second=max(1, min(10, int(1.0 / interval))), screen=use_screen) as live:
+    start_keyboard_listener()
+
+    if use_screen:
+        console.clear()
+
+    with Live(
+        console=console,
+        refresh_per_second=max(1, min(10, int(1.0 / interval))),
+        screen=use_screen,
+    ) as live:
         while running:
             now = time.time()
             dt = now - prev_t
@@ -871,18 +1270,15 @@ def run_live(interval: float) -> int:
             prev_cpu, prev_net, prev_disk_io, prev_t = cur_cpu, cur_net, cur_disk_io, now
 
             mem = read_meminfo()
-            temps = read_cpu_temps()
-            failed = failed_systemd_units()
-            zombies = zombie_count()
-            crashloops = k3s_crashloop_count()
-            certs = find_tls_certs()
+            slow = collector.snapshot()
 
             live.update(render_dashboard(
-                interval, sysinfo, temps, overall_cpu, per_cpu, mem, read_disks(), dio,
-                rx_rate, tx_rate, ifaces, failed, zombies, crashloops, certs,
+                interval, sysinfo, slow, overall_cpu, per_cpu, mem, dio,
+                rx_rate, tx_rate, ifaces,
             ))
             time.sleep(interval)
 
+    collector.stop()
     if use_screen:
         console.clear()
     console.print("[dim]Dashboard stopped.[/dim]")
