@@ -29,7 +29,7 @@ else
   if [[ -d "${PKG_DIR}/src/usr/share/${PKG_NAME}" ]]; then
     mkdir -p "${STAGING}/usr/share/${PKG_NAME}"
     cp -r "${PKG_DIR}/src/usr/share/${PKG_NAME}/." "${STAGING}/usr/share/${PKG_NAME}/"
-    find "${STAGING}/usr/share/${PKG_NAME}" -type f -name '*.sh' -exec chmod 755 {} +
+    find "${STAGING}/usr/share/${PKG_NAME}" -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod 755 {} +
   fi
 fi
 

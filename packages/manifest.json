@@ -138,6 +138,17 @@
       "installCommand": "sudo apt install himosoft-healthcheck",
       "usageCommand": "himosoft-healthcheck run",
       "tags": ["diagnostics"]
+    },
+    {
+      "name": "himosoft-server-status",
+      "title": "Live server dashboard",
+      "description": "Human-readable htop alternative — live CPU, memory, swap, disk, network charts; top apps by CPU and memory with PID.",
+      "status": "available",
+      "architecture": "all",
+      "depends": ["python3", "python3-rich", "curl", "ca-certificates", "himosoft-common"],
+      "installCommand": "sudo apt install himosoft-server-status",
+      "usageCommand": "himosoft-server-status",
+      "tags": ["monitoring", "dashboard", "htop"]
     }
   ]
 }

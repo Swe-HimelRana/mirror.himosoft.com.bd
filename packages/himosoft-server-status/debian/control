@@ -1,0 +1,9 @@
+Package: himosoft-server-status
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: python3, python3-rich, curl, ca-certificates, himosoft-common
+Maintainer: Himosoft <mirror@himosoft.com.bd>
+Description: Himosoft server status — live human-readable system dashboard
+ Real-time CPU, memory, disk, network, and process view with charts. Alternative to htop.

@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONF="/etc/himosoft/server-status.conf"
+DASHBOARD="/usr/share/himosoft-server-status/dashboard.py"
+
+usage() {
+  cat <<'EOF'
+Himosoft Server Status — live system dashboard
+
+Usage:
+  himosoft-server-status              Start live dashboard (auto-refresh)
+  himosoft-server-status run          Same as above
+  himosoft-server-status configure    Set refresh interval (interactive)
+  himosoft-server-status help
+
+Options (run):
+  --interval SECONDS   Override refresh interval for this session
+
+Press Ctrl+C to quit the dashboard.
+EOF
+}
+
+load_interval() {
+  if [[ -f "${CONF}" ]]; then
+    # shellcheck disable=SC1090
+    source "${CONF}"
+    echo "${REFRESH_INTERVAL:-}"
+  fi
+}
+
+cmd_configure() {
+  # shellcheck source=/dev/null
+  source /usr/share/himosoft/lib/interactive.sh
+  hs_banner "Server status dashboard"
+
+  hs_prompt REFRESH_INTERVAL "Enter refresh interval in seconds (e.g. 2)"
+  [[ -n "${REFRESH_INTERVAL}" ]] || { echo "Interval is required."; exit 1; }
+  if ! [[ "${REFRESH_INTERVAL}" =~ ^[0-9]+$ ]] || [[ "${REFRESH_INTERVAL}" -lt 1 ]]; then
+    echo "Interval must be a positive integer."
+    exit 1
+  fi
+
+  hs_confirm "Save interval ${REFRESH_INTERVAL}s to ${CONF}?" || exit 0
+
+  mkdir -p /etc/himosoft
+  cat > "${CONF}" <<EOF
+REFRESH_INTERVAL=${REFRESH_INTERVAL}
+EOF
+  chmod 644 "${CONF}"
+  echo "Saved. Run: himosoft-server-status"
+}
+
+cmd_run() {
+  local interval_override=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --interval)
+        interval_override="${2:?--interval requires a value}"
+        shift 2
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        usage
+        exit 1
+        ;;
+    esac
+  done
+
+  if ! command -v python3 >/dev/null; then
+    echo "python3 not found." >&2
+    exit 1
+  fi
+
+  if ! python3 -c "import rich" 2>/dev/null; then
+    echo "python3-rich not found. Install: sudo apt install python3-rich" >&2
+    exit 1
+  fi
+
+  local interval="${interval_override:-$(load_interval)}"
+
+  if [[ -z "${interval}" ]]; then
+    # shellcheck source=/dev/null
+    source /usr/share/himosoft/lib/interactive.sh
+    hs_prompt REFRESH_INTERVAL "Enter refresh interval in seconds"
+    [[ -n "${REFRESH_INTERVAL}" ]] || exit 1
+    interval="${REFRESH_INTERVAL}"
+  fi
+
+  exec python3 "${DASHBOARD}" --interval "${interval}"
+}
+
+main() {
+  case "${1:-run}" in
+    run) shift; cmd_run "$@" ;;
+    configure) cmd_configure ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"

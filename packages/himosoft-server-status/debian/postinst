@@ -1,0 +1,4 @@
+#!/bin/sh
+echo "Run: himosoft-server-status"
+echo "     himosoft-server-status configure   # set refresh interval"
+exit 0
