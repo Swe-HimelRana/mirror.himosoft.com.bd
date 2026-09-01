@@ -11,8 +11,8 @@ Site and APT mirror are deployed by [.github/workflows/deploy-mirror.yml](../.gi
 ## Local preview
 
 ```bash
-./scripts/build-all.sh
-./scripts/publish-apt-repo.sh
+./scripts/build-all.sh          # requires dpkg-deb (dpkg-dev)
+./scripts/publish-apt-repo.sh   # requires apt-ftparchive (apt-utils)
 cd site && python3 -m http.server 8765
 # Open http://localhost:8765
 ```

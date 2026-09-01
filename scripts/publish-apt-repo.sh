@@ -4,11 +4,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SITE="${ROOT}/site"
-DIST="${SITE}/dists/stable/main/binary-amd64"
+DIST="${SITE}/dists/stable/main"
 POOL="${SITE}/pool"
 
 rm -rf "${SITE}"
-mkdir -p "${DIST}" "${POOL}"
+mkdir -p "${DIST}/binary-all" "${DIST}/binary-amd64" "${POOL}"
 
 echo "==> Copying site assets"
 cp "${ROOT}/index.html" "${SITE}/"
@@ -35,21 +35,19 @@ if [[ "${found}" -eq 0 ]]; then
   exit 1
 fi
 
-echo "==> Generating Packages index"
+echo "==> Generating Packages indexes"
 cd "${SITE}"
-dpkg-scanpackages --arch amd64 pool/ > "${DIST}/Packages"
-gzip -9 -c "${DIST}/Packages" > "${DIST}/Packages.gz"
 
-cat > "${SITE}/dists/stable/Release" <<EOF
-Origin: Himosoft
-Label: Himosoft Mirror
-Suite: stable
-Codename: stable
-Architectures: amd64 all
-Components: main
-Description: Himosoft server packages
-Date: $(date -Ru)
-EOF
+# Himosoft packages are Architecture: all — apt reads binary-all on amd64 hosts.
+dpkg-scanpackages --arch all pool/ > "${DIST}/binary-all/Packages"
+gzip -9 -c "${DIST}/binary-all/Packages" > "${DIST}/binary-all/Packages.gz"
+
+# Keep amd64 index for future native packages; includes all-arch entries too.
+dpkg-scanpackages --arch amd64 pool/ > "${DIST}/binary-amd64/Packages"
+gzip -9 -c "${DIST}/binary-amd64/Packages" > "${DIST}/binary-amd64/Packages.gz"
+
+echo "==> Generating Release (with checksums)"
+apt-ftparchive release dists/stable > dists/stable/Release
 
 echo "==> Generating packages.json"
 python3 "${ROOT}/scripts/generate-packages-json.py" "${SITE}"
@@ -57,5 +55,7 @@ python3 "${ROOT}/scripts/generate-packages-json.py" "${SITE}"
 echo ""
 echo "Site ready: ${SITE}/"
 echo "  packages.json"
+echo "  dists/stable/main/binary-all/Packages.gz"
 echo "  dists/stable/main/binary-amd64/Packages.gz"
+echo "  dists/stable/Release"
 find "${POOL}" -name '*.deb' | head -20
