@@ -46,6 +46,19 @@
       <div class="container">
         <h2>Packages</h2>
         <p class="meta-bar" data-packages-meta>Loading package index…</p>
+        <div class="package-search" data-package-search hidden>
+          <label class="sr-only" for="package-search-input">Search packages</label>
+          <input
+            type="search"
+            id="package-search-input"
+            class="package-search-input"
+            placeholder="Search by name, description, or tag…"
+            autocomplete="off"
+            spellcheck="false"
+          >
+          <button type="button" class="package-search-clear" data-search-clear hidden aria-label="Clear search">×</button>
+        </div>
+        <p class="search-empty" data-search-empty hidden>No packages match your search.</p>
         <div class="grid loading" data-packages-grid>
           Loading packages…
         </div>
