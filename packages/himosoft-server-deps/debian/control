@@ -1,0 +1,10 @@
+Package: himosoft-server-deps
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: curl, ca-certificates
+Maintainer: Himosoft <admin@himosoft.com.bd>
+Description: Himosoft server dependencies — interactive ops CLI bundle
+ Installs common server tools (curl, jq, gnupg, etc.) with confirmation
+ at each step. Optional Helm install via official upstream script.

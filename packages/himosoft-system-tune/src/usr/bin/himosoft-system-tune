@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source /usr/share/himosoft/lib/interactive.sh
+
+SYSCTL_FILE="/etc/sysctl.d/99-himosoft.conf"
+
+usage() {
+  cat <<'EOF'
+Himosoft System Tune — sysctl for K3s hosts
+
+Usage:
+  himosoft-system-tune apply     Show settings and apply after confirm
+  himosoft-system-tune status
+EOF
+}
+
+show_settings() {
+  cat <<'EOF'
+vm.max_map_count=262144
+fs.inotify.max_user_instances=8192
+fs.inotify.max_user_watches=524288
+net.core.somaxconn=65535
+net.ipv4.ip_forward=1
+EOF
+}
+
+cmd_apply() {
+  hs_require_root
+  hs_banner "System tuning"
+  echo "The following sysctl values will be written to ${SYSCTL_FILE}:"
+  echo ""
+  show_settings
+  echo ""
+  hs_confirm "Apply these settings?" || { echo "Aborted."; exit 0; }
+
+  show_settings > "${SYSCTL_FILE}"
+  sysctl --system >/dev/null
+  echo "Applied. Reboot recommended if this is a new K3s node."
+}
+
+cmd_status() {
+  [[ -f "${SYSCTL_FILE}" ]] && cat "${SYSCTL_FILE}" || echo "Not configured yet."
+}
+
+main() {
+  case "${1:-apply}" in
+    apply) cmd_apply ;;
+    status) cmd_status ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"

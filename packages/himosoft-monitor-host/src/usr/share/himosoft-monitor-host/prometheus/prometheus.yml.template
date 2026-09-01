@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: node-server-c
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          instance: server-c
+
+  - job_name: node-server-a
+    static_configs:
+      - targets: ["${SERVER_A_NODE_EXPORTER}"]
+        labels:
+          instance: server-a
+
+  - job_name: node-server-b
+    static_configs:
+      - targets: ["${SERVER_B_NODE_EXPORTER}"]
+        labels:
+          instance: server-b

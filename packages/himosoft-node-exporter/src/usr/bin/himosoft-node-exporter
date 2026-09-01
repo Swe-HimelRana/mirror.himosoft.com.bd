@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source /usr/share/himosoft/lib/interactive.sh
+
+CONF="/etc/himosoft/node-exporter.conf"
+
+usage() {
+  cat <<'EOF'
+Himosoft Node Exporter
+
+Usage:
+  himosoft-node-exporter install
+  himosoft-node-exporter status
+EOF
+}
+
+cmd_install() {
+  hs_require_root
+  hs_banner "Node exporter"
+
+  hs_prompt LISTEN_ADDRESS "Enter listen address (e.g. 0.0.0.0 or your private IP)"
+  [[ -n "${LISTEN_ADDRESS}" ]] || { echo "Listen address is required."; exit 1; }
+
+  hs_prompt LISTEN_PORT "Enter listen port (Prometheus scrape port)"
+  [[ -n "${LISTEN_PORT}" ]] || { echo "Listen port is required."; exit 1; }
+
+  echo ""
+  echo "Will install prometheus-node-exporter and listen on ${LISTEN_ADDRESS}:${LISTEN_PORT}"
+  hs_confirm "Proceed?" || exit 0
+
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y prometheus-node-exporter
+
+  mkdir -p /etc/default
+  cat > /etc/default/prometheus-node-exporter <<EOF
+ARGS="--web.listen-address=${LISTEN_ADDRESS}:${LISTEN_PORT}"
+EOF
+
+  mkdir -p /etc/himosoft
+  cat > "${CONF}" <<EOF
+LISTEN_ADDRESS="${LISTEN_ADDRESS}"
+LISTEN_PORT="${LISTEN_PORT}"
+EOF
+  chmod 600 "${CONF}"
+
+  systemctl enable prometheus-node-exporter
+  systemctl restart prometheus-node-exporter
+  echo "Node exporter running on ${LISTEN_ADDRESS}:${LISTEN_PORT}"
+}
+
+cmd_status() {
+  systemctl status prometheus-node-exporter --no-pager 2>/dev/null || true
+  [[ -f "${CONF}" ]] && cat "${CONF}"
+}
+
+main() {
+  case "${1:-install}" in
+    install) cmd_install ;;
+    status) cmd_status ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"

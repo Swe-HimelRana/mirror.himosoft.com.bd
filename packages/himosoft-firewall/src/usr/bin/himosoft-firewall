@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source /usr/share/himosoft/lib/interactive.sh
+
+CONF="/etc/himosoft/firewall.conf"
+
+usage() {
+  cat <<'EOF'
+Himosoft Firewall — interactive UFW configuration
+
+Usage:
+  himosoft-firewall configure
+  himosoft-firewall status
+  himosoft-firewall help
+
+Prompts for admin IP and optional database replica source IP.
+EOF
+}
+
+save_conf() {
+  mkdir -p /etc/himosoft
+  cat > "${CONF}" <<EOF
+ADMIN_IP="${ADMIN_IP}"
+REPLICA_IP="${REPLICA_IP}"
+EOF
+  chmod 600 "${CONF}"
+}
+
+cmd_configure() {
+  hs_require_root
+  hs_banner "UFW configuration"
+
+  hs_prompt ADMIN_IP "Enter your admin IP (SSH + K3s API 6443)"
+  [[ -n "${ADMIN_IP}" ]] || { echo "Admin IP is required."; exit 1; }
+
+  hs_prompt_optional REPLICA_IP "Enter replica/monitoring source IP for DB ports (3306,5432,27017,6379)"
+
+  echo ""
+  echo "Rules to apply:"
+  echo "  allow 80/tcp, 443/tcp (public)"
+  echo "  allow from ${ADMIN_IP} to any port 22,6443"
+  if [[ -n "${REPLICA_IP}" ]]; then
+    echo "  allow from ${REPLICA_IP} to any port 3306,5432,27017,6379"
+  fi
+  echo "  default deny incoming"
+  echo ""
+
+  hs_confirm "Apply these UFW rules?" || { echo "Aborted."; exit 0; }
+
+  ufw --force reset
+  ufw default deny incoming
+  ufw default allow outgoing
+  ufw allow 80/tcp
+  ufw allow 443/tcp
+  ufw allow from "${ADMIN_IP}" to any port 22 proto tcp
+  ufw allow from "${ADMIN_IP}" to any port 6443 proto tcp
+  if [[ -n "${REPLICA_IP}" ]]; then
+    ufw allow from "${REPLICA_IP}" to any port 3306 proto tcp
+    ufw allow from "${REPLICA_IP}" to any port 5432 proto tcp
+    ufw allow from "${REPLICA_IP}" to any port 27017 proto tcp
+    ufw allow from "${REPLICA_IP}" to any port 6379 proto tcp
+  fi
+
+  save_conf
+  ufw --force enable
+  ufw status verbose
+}
+
+cmd_status() {
+  ufw status verbose 2>/dev/null || echo "UFW not active"
+  [[ -f "${CONF}" ]] && echo "" && cat "${CONF}"
+}
+
+main() {
+  case "${1:-configure}" in
+    configure) cmd_configure ;;
+    status) cmd_status ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"

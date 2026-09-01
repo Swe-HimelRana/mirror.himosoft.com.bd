@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source /usr/share/himosoft/lib/interactive.sh
+
+usage() {
+  cat <<'EOF'
+Himosoft Docker Host
+
+Usage:
+  himosoft-docker-host install
+  himosoft-docker-host status
+EOF
+}
+
+cmd_install() {
+  hs_require_root
+  hs_banner "Docker Engine"
+
+  hs_prompt DOCKER_USER "Enter Linux username to add to the docker group"
+  [[ -n "${DOCKER_USER}" ]] || { echo "Username is required."; exit 1; }
+  id "${DOCKER_USER}" >/dev/null 2>&1 || { echo "User ${DOCKER_USER} does not exist."; exit 1; }
+
+  echo ""
+  echo "Will install: docker.io docker-compose-plugin"
+  echo "Will add user '${DOCKER_USER}' to group docker"
+  hs_confirm "Proceed?" || exit 0
+
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-compose-plugin
+  usermod -aG docker "${DOCKER_USER}"
+  systemctl enable --now docker
+
+  echo "Docker installed. User ${DOCKER_USER} must log out/in for group membership."
+}
+
+cmd_status() {
+  docker info 2>/dev/null | head -5 || echo "Docker not running"
+}
+
+main() {
+  case "${1:-install}" in
+    install) cmd_install ;;
+    status) cmd_status ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"

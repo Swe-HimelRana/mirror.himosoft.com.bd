@@ -1,0 +1,9 @@
+Package: himosoft-system-tune
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: curl, ca-certificates
+Maintainer: Himosoft <admin@himosoft.com.bd>
+Description: Himosoft system tuning — interactive sysctl for K3s hosts
+ Shows proposed kernel settings and applies only after confirmation.

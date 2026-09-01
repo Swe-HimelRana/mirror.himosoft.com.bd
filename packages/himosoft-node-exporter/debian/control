@@ -1,0 +1,9 @@
+Package: himosoft-node-exporter
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: curl, ca-certificates
+Maintainer: Himosoft <admin@himosoft.com.bd>
+Description: Himosoft node exporter — interactive Prometheus node_exporter setup
+ Prompts for listen address and port before enabling the service.

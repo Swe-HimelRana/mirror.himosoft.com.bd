@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "Usage: himosoft-healthcheck run"
+}
+
+cmd_run() {
+  echo "=== Himosoft Healthcheck ==="
+  echo "Time: $(date -Iseconds)"
+  echo ""
+
+  echo "--- System ---"
+  echo "Hostname: $(hostname)"
+  echo "Uptime: $(uptime -p 2>/dev/null || uptime)"
+  free -h 2>/dev/null || true
+  df -h / /var 2>/dev/null || df -h /
+  echo ""
+
+  echo "--- K3s ---"
+  if command -v k3s >/dev/null; then
+    systemctl is-active k3s 2>/dev/null && echo "k3s: active" || echo "k3s: inactive"
+    k3s kubectl get nodes 2>/dev/null || echo "kubectl: unavailable"
+  else
+    echo "k3s: not installed"
+  fi
+  echo ""
+
+  echo "--- Docker ---"
+  if command -v docker >/dev/null; then
+    systemctl is-active docker 2>/dev/null && echo "docker: active" || echo "docker: inactive"
+    docker ps --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null | head -10 || true
+  else
+    echo "docker: not installed"
+  fi
+  echo ""
+
+  echo "--- Firewall ---"
+  ufw status 2>/dev/null || echo "ufw: not installed or not active"
+  echo ""
+
+  echo "--- Node exporter ---"
+  systemctl is-active prometheus-node-exporter 2>/dev/null && echo "node-exporter: active" || echo "node-exporter: not active"
+  echo ""
+  echo "Done."
+}
+
+main() {
+  case "${1:-run}" in
+    run) cmd_run ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"

@@ -1,0 +1,9 @@
+Package: himosoft-healthcheck
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: curl, ca-certificates
+Maintainer: Himosoft <admin@himosoft.com.bd>
+Description: Himosoft healthcheck — read-only server status report
+ No configuration required. Runs local checks only.

@@ -1,0 +1,133 @@
+{
+  "mirrorUrl": "https://mirror.himosoft.com.bd",
+  "suite": "stable",
+  "featuredInstall": {
+    "mirrorScript": "curl -fsSL https://mirror.himosoft.com.bd/install-mirror.sh | sudo bash",
+    "aptUpdate": "sudo apt update",
+    "installTemplate": "sudo apt install <package-name>",
+    "examplePackage": "himosoft-k3s-server"
+  },
+  "packages": [
+    {
+      "name": "himosoft-k3s-server",
+      "title": "Interactive K3s server setup",
+      "description": "Prompts for public IP, domain, and optional K3s version. Installs K3s with Traefik disabled.",
+      "status": "available",
+      "architecture": "all",
+      "depends": ["curl", "ca-certificates"],
+      "installCommand": "sudo apt install himosoft-k3s-server",
+      "usageCommand": "sudo himosoft-k3s-server install",
+      "tags": ["k3s", "kubernetes", "server-a"]
+    },
+    {
+      "name": "himosoft-server-deps",
+      "title": "Server dependencies",
+      "description": "Installs common CLI tools (kubectl, helm, jq, etc.) with operator confirmation.",
+      "status": "available",
+      "architecture": "all",
+      "depends": ["curl", "ca-certificates"],
+      "installCommand": "sudo apt install himosoft-server-deps",
+      "usageCommand": "sudo himosoft-server-deps install",
+      "tags": ["tools", "server-a"]
+    },
+    {
+      "name": "himosoft-firewall",
+      "title": "UFW firewall setup",
+      "description": "Interactive UFW rules for Server A — prompts for admin IP and optional replica IP.",
+      "status": "available",
+      "architecture": "all",
+      "depends": ["curl", "ca-certificates"],
+      "installCommand": "sudo apt install himosoft-firewall",
+      "usageCommand": "sudo himosoft-firewall configure",
+      "tags": ["security", "server-a"]
+    },
+    {
+      "name": "himosoft-system-tune",
+      "title": "Kernel sysctl tuning",
+      "description": "Shows proposed sysctl values and applies them only after confirmation.",
+      "status": "available",
+      "architecture": "all",
+      "depends": ["curl", "ca-certificates"],
+      "installCommand": "sudo apt install himosoft-system-tune",
+      "usageCommand": "sudo himosoft-system-tune apply",
+      "tags": ["performance", "server-a"]
+    },
+    {
+      "name": "himosoft-docker-host",
+      "title": "Docker host setup",
+      "description": "Installs Docker Engine and prompts for the user to add to the docker group.",
+      "status": "available",
+      "architecture": "all",
+      "depends": ["curl", "ca-certificates"],
+      "installCommand": "sudo apt install himosoft-docker-host",
+      "usageCommand": "sudo himosoft-docker-host install",
+      "tags": ["docker", "server-b", "server-c"]
+    },
+    {
+      "name": "himosoft-server-b-replica",
+      "title": "Server B database replicas",
+      "description": "Interactive Docker Compose stack for MySQL, PostgreSQL, MongoDB, and Redis replicas.",
+      "status": "available",
+      "architecture": "all",
+      "depends": ["curl", "ca-certificates"],
+      "installCommand": "sudo apt install himosoft-server-b-replica",
+      "usageCommand": "sudo himosoft-server-b-replica init",
+      "tags": ["database", "replica", "server-b"]
+    },
+    {
+      "name": "himosoft-monitor-host",
+      "title": "Monitoring stack (Server C)",
+      "description": "Prometheus, Grafana, Traefik, and GitHub OAuth — all settings entered at the prompt.",
+      "status": "available",
+      "architecture": "all",
+      "depends": ["curl", "ca-certificates", "gettext-base"],
+      "installCommand": "sudo apt install himosoft-monitor-host",
+      "usageCommand": "sudo himosoft-monitor-host init",
+      "tags": ["monitoring", "grafana", "prometheus", "server-c"]
+    },
+    {
+      "name": "himosoft-node-exporter",
+      "title": "Node exporter",
+      "description": "Installs prometheus-node-exporter — prompts for listen address and port.",
+      "status": "available",
+      "architecture": "all",
+      "depends": ["curl", "ca-certificates"],
+      "installCommand": "sudo apt install himosoft-node-exporter",
+      "usageCommand": "sudo himosoft-node-exporter install",
+      "tags": ["monitoring", "prometheus"]
+    },
+    {
+      "name": "himosoft-kubeconfig",
+      "title": "Kubeconfig export",
+      "description": "Exports K3s kubeconfig with your chosen server address — no automatic IP detection.",
+      "status": "available",
+      "architecture": "all",
+      "depends": ["curl", "ca-certificates"],
+      "installCommand": "sudo apt install himosoft-kubeconfig",
+      "usageCommand": "sudo himosoft-kubeconfig export",
+      "tags": ["kubernetes", "kubectl"]
+    },
+    {
+      "name": "himosoft-backup-agent",
+      "title": "Restic backup agent",
+      "description": "Interactive Restic backup — prompts for repository, password, paths, and cron schedule.",
+      "status": "available",
+      "architecture": "all",
+      "depends": ["curl", "ca-certificates"],
+      "installCommand": "sudo apt install himosoft-backup-agent",
+      "usageCommand": "sudo himosoft-backup-agent configure",
+      "tags": ["backup", "restic"]
+    },
+    {
+      "name": "himosoft-healthcheck",
+      "title": "Server healthcheck",
+      "description": "Read-only status report for K3s, Docker, firewall, and node-exporter. No configuration needed.",
+      "status": "available",
+      "architecture": "all",
+      "depends": ["curl", "ca-certificates"],
+      "installCommand": "sudo apt install himosoft-healthcheck",
+      "usageCommand": "himosoft-healthcheck run",
+      "tags": ["diagnostics"]
+    }
+  ]
+}

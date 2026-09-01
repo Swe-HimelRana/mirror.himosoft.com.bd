@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source /usr/share/himosoft/lib/interactive.sh
+
+SHARE="/usr/share/himosoft-monitor-host"
+
+usage() {
+  cat <<'EOF'
+Himosoft Monitor Host (Server C)
+
+Usage:
+  himosoft-monitor-host init      Interactive .env + Prometheus config
+  himosoft-monitor-host start     docker compose up -d
+  himosoft-monitor-host stop      docker compose down
+  himosoft-monitor-host status
+
+Requires Docker (install himosoft-docker-host first).
+All values are entered at the prompt — nothing is pre-filled.
+EOF
+}
+
+require_docker() {
+  command -v docker >/dev/null || { echo "Docker not found. Install himosoft-docker-host first."; exit 1; }
+}
+
+require_install_dir() {
+  hs_prompt INSTALL_DIR "Enter install directory"
+  [[ -n "${INSTALL_DIR}" ]] || exit 1
+  [[ -d "${INSTALL_DIR}" ]] || { echo "Directory not found: ${INSTALL_DIR}"; exit 1; }
+}
+
+cmd_init() {
+  hs_require_root
+  require_docker
+  hs_banner "Monitor host (Prometheus + Grafana)"
+
+  hs_prompt INSTALL_DIR "Enter install directory (will be created)"
+  [[ -n "${INSTALL_DIR}" ]] || exit 1
+
+  hs_prompt GRAFANA_HOST "Grafana hostname (DNS)"
+  hs_prompt PROMETHEUS_HOST "Prometheus hostname (DNS)"
+  hs_prompt OAUTH_HOST "OAuth hostname (DNS)"
+  hs_prompt COOKIE_DOMAIN "Cookie domain (e.g. .example.com)"
+  hs_prompt ACME_EMAIL "Let's Encrypt email"
+
+  hs_prompt OAUTH2_CLIENT_ID "GitHub OAuth client ID"
+  hs_prompt_secret OAUTH2_CLIENT_SECRET "GitHub OAuth client secret"
+  hs_prompt_secret OAUTH2_COOKIE_SECRET "OAuth cookie secret (32-byte base64)"
+  hs_prompt_optional OAUTH2_GITHUB_USERS "GitHub usernames allowed (comma-separated)"
+
+  hs_prompt GRAFANA_ADMIN_USER "Grafana admin username"
+  hs_prompt_secret GRAFANA_ADMIN_PASSWORD "Grafana admin password"
+
+  hs_prompt SERVER_A_NODE_EXPORTER "Server A node-exporter target (host:port)"
+  hs_prompt SERVER_B_NODE_EXPORTER "Server B node-exporter target (host:port)"
+  hs_prompt PROMETHEUS_RETENTION "Prometheus retention (e.g. 15d)"
+
+  for v in GRAFANA_HOST PROMETHEUS_HOST OAUTH_HOST COOKIE_DOMAIN ACME_EMAIL \
+           OAUTH2_CLIENT_ID OAUTH2_CLIENT_SECRET OAUTH2_COOKIE_SECRET \
+           GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD \
+           SERVER_A_NODE_EXPORTER SERVER_B_NODE_EXPORTER PROMETHEUS_RETENTION; do
+    [[ -n "${!v}" ]] || { echo "${v} is required."; exit 1; }
+  done
+
+  echo ""
+  echo "Install directory: ${INSTALL_DIR}"
+  hs_confirm "Write configuration and copy stack files?" || exit 0
+
+  mkdir -p "${INSTALL_DIR}/prometheus" "${INSTALL_DIR}/grafana/provisioning/dashboards" \
+           "${INSTALL_DIR}/grafana/provisioning/datasources"
+
+  cp "${SHARE}/docker-compose.yml" "${INSTALL_DIR}/"
+  cp "${SHARE}/prometheus/prometheus.yml.template" "${INSTALL_DIR}/prometheus/"
+  cp "${SHARE}/grafana/provisioning/dashboards/default.yml" "${INSTALL_DIR}/grafana/provisioning/dashboards/"
+  cp "${SHARE}/grafana/provisioning/datasources/datasource-prometheus.yaml" \
+     "${INSTALL_DIR}/grafana/provisioning/datasources/"
+
+  cat > "${INSTALL_DIR}/.env" <<EOF
+GRAFANA_HOST=${GRAFANA_HOST}
+PROMETHEUS_HOST=${PROMETHEUS_HOST}
+OAUTH_HOST=${OAUTH_HOST}
+COOKIE_DOMAIN=${COOKIE_DOMAIN}
+ACME_EMAIL=${ACME_EMAIL}
+OAUTH2_CLIENT_ID=${OAUTH2_CLIENT_ID}
+OAUTH2_CLIENT_SECRET=${OAUTH2_CLIENT_SECRET}
+OAUTH2_COOKIE_SECRET=${OAUTH2_COOKIE_SECRET}
+OAUTH2_GITHUB_USERS=${OAUTH2_GITHUB_USERS}
+GRAFANA_ADMIN_USER=${GRAFANA_ADMIN_USER}
+GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+SERVER_A_NODE_EXPORTER=${SERVER_A_NODE_EXPORTER}
+SERVER_B_NODE_EXPORTER=${SERVER_B_NODE_EXPORTER}
+PROMETHEUS_RETENTION=${PROMETHEUS_RETENTION}
+EOF
+  chmod 600 "${INSTALL_DIR}/.env"
+
+  set -a
+  # shellcheck disable=SC1091
+  source "${INSTALL_DIR}/.env"
+  set +a
+  envsubst < "${INSTALL_DIR}/prometheus/prometheus.yml.template" > "${INSTALL_DIR}/prometheus/prometheus.yml"
+
+  echo "Configured ${INSTALL_DIR}. Run: himosoft-monitor-host start"
+  echo "Point DNS for Grafana, Prometheus, and OAuth hosts to this server."
+}
+
+compose() {
+  docker compose -f "${INSTALL_DIR}/docker-compose.yml" --env-file "${INSTALL_DIR}/.env" "$@"
+}
+
+cmd_start() {
+  hs_require_root
+  require_docker
+  require_install_dir
+  set -a
+  # shellcheck disable=SC1091
+  source "${INSTALL_DIR}/.env"
+  set +a
+  envsubst < "${INSTALL_DIR}/prometheus/prometheus.yml.template" > "${INSTALL_DIR}/prometheus/prometheus.yml"
+  compose up -d
+  echo "Grafana:    https://${GRAFANA_HOST}"
+  echo "Prometheus: https://${PROMETHEUS_HOST}"
+}
+
+cmd_stop() {
+  hs_require_root
+  require_install_dir
+  compose down
+}
+
+cmd_status() {
+  require_install_dir
+  compose ps 2>/dev/null || echo "Not running"
+}
+
+main() {
+  case "${1:-init}" in
+    init) cmd_init ;;
+    start) cmd_start ;;
+    stop) cmd_stop ;;
+    status) cmd_status ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"

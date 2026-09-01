@@ -1,0 +1,9 @@
+Package: himosoft-firewall
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: ufw, curl, ca-certificates
+Maintainer: Himosoft <admin@himosoft.com.bd>
+Description: Himosoft firewall — interactive UFW setup
+ Prompts for admin IP and optional replica source IP before applying rules.

@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source /usr/share/himosoft/lib/interactive.sh
+
+usage() {
+  cat <<'EOF'
+Himosoft Server Dependencies
+
+Usage:
+  himosoft-server-deps install   Interactive install of ops packages
+  himosoft-server-deps help
+EOF
+}
+
+cmd_install() {
+  hs_require_root
+  hs_banner "Server dependencies"
+
+  echo "Base packages: curl jq ca-certificates gnupg apt-transport-https"
+  hs_confirm "Install base packages?" || exit 0
+
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    curl jq ca-certificates gnupg apt-transport-https
+
+  if hs_confirm "Install Helm 3 via official get-helm-3 script?"; then
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  fi
+
+  echo "Done. Installed: $(command -v jq && echo jq) $(command -v helm && echo helm || true)"
+}
+
+main() {
+  case "${1:-install}" in
+    install) cmd_install ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"

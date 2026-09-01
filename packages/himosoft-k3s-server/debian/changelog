@@ -1,0 +1,5 @@
+himosoft-k3s-server (1.0.0) stable; urgency=medium
+
+  * Initial release: interactive K3s server setup for Linux servers.
+
+ -- Himosoft <admin@himosoft.com.bd>  Tue, 01 Sep 2026 14:00:00 +0600

@@ -1,0 +1,80 @@
+# Server B database replicas — deployed by himosoft-server-b-replica
+services:
+  mysql-replica:
+    image: mysql:8.4
+    container_name: mysql-replica
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    command:
+      - --server-id=2
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --read-only=ON
+    volumes:
+      - mysql_replica_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    networks:
+      - replica-net
+
+  postgres-standby:
+    image: postgres:16-alpine
+    container_name: postgres-standby
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_standby_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - replica-net
+
+  mongodb-secondary:
+    image: mongo:7.0
+    container_name: mongodb-secondary
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - mongodb_secondary_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - replica-net
+
+  redis-replica:
+    image: redis:7-alpine
+    container_name: redis-replica
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --replicaof
+      - ${SERVER_A_PRIVATE_IP}
+      - "6379"
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --masterauth
+      - ${REDIS_PASSWORD}
+    volumes:
+      - redis_replica_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - replica-net
+
+networks:
+  replica-net:
+    driver: bridge
+
+volumes:
+  mysql_replica_data:
+  postgres_standby_data:
+  mongodb_secondary_data:
+  redis_replica_data:

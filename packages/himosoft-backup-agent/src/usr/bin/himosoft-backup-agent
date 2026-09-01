@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source /usr/share/himosoft/lib/interactive.sh
+
+CONF="/etc/himosoft/backup-agent.conf"
+CREDS="/etc/himosoft/backup-restic-password"
+SCRIPT="/usr/local/bin/himosoft-restic-backup.sh"
+
+usage() {
+  cat <<'EOF'
+Himosoft Backup Agent (Restic)
+
+Usage:
+  himosoft-backup-agent configure
+  himosoft-backup-agent run
+  himosoft-backup-agent status
+EOF
+}
+
+cmd_configure() {
+  hs_require_root
+  hs_banner "Restic backup agent"
+
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y restic cron
+
+  hs_prompt RESTIC_REPOSITORY "Enter Restic repository URL (e.g. sftp:user@host:/path)"
+  [[ -n "${RESTIC_REPOSITORY}" ]] || exit 1
+
+  hs_prompt_secret RESTIC_PASSWORD "Enter Restic repository password"
+  [[ -n "${RESTIC_PASSWORD}" ]] || exit 1
+
+  hs_prompt BACKUP_PATHS "Enter paths to backup (space-separated)"
+  [[ -n "${BACKUP_PATHS}" ]] || exit 1
+
+  hs_prompt CRON_SCHEDULE "Enter cron schedule (e.g. 0 3 * * *)"
+  [[ -n "${CRON_SCHEDULE}" ]] || exit 1
+
+  echo ""
+  hs_confirm "Save configuration and install cron job?" || exit 0
+
+  echo "${RESTIC_PASSWORD}" > "${CREDS}"
+  chmod 600 "${CREDS}"
+
+  cat > "${CONF}" <<EOF
+RESTIC_REPOSITORY="${RESTIC_REPOSITORY}"
+BACKUP_PATHS="${BACKUP_PATHS}"
+CRON_SCHEDULE="${CRON_SCHEDULE}"
+EOF
+  chmod 600 "${CONF}"
+
+  cat > "${SCRIPT}" <<'EOS'
+#!/bin/sh
+set -e
+. /etc/himosoft/backup-agent.conf
+export RESTIC_PASSWORD="$(cat /etc/himosoft/backup-restic-password)"
+export RESTIC_REPOSITORY
+restic backup ${BACKUP_PATHS}
+EOS
+  chmod 755 "${SCRIPT}"
+
+  (crontab -l 2>/dev/null | grep -v himosoft-restic-backup; echo "${CRON_SCHEDULE} ${SCRIPT}") | crontab -
+  echo "Configured. Test with: himosoft-backup-agent run"
+}
+
+cmd_run() {
+  hs_require_root
+  "${SCRIPT}"
+}
+
+cmd_status() {
+  [[ -f "${CONF}" ]] && cat "${CONF}" || echo "Not configured"
+  crontab -l 2>/dev/null | grep himosoft-restic || true
+}
+
+main() {
+  case "${1:-configure}" in
+    configure) cmd_configure ;;
+    run) cmd_run ;;
+    status) cmd_status ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"

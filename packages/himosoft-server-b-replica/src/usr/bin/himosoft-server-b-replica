@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source /usr/share/himosoft/lib/interactive.sh
+
+SHARE="/usr/share/himosoft-server-b-replica"
+INSTALL_DIR="/opt/himosoft/server-b-replica"
+
+usage() {
+  cat <<'EOF'
+Himosoft Server B Replica
+
+Usage:
+  himosoft-server-b-replica init      Interactive .env + compose setup
+  himosoft-server-b-replica start     docker compose up -d
+  himosoft-server-b-replica status
+
+Requires Docker (install himosoft-docker-host first).
+All secrets are entered at the prompt — nothing is pre-filled.
+EOF
+}
+
+cmd_init() {
+  hs_require_root
+  hs_banner "Server B replica stack"
+
+  command -v docker >/dev/null || { echo "Docker not found. Install himosoft-docker-host first."; exit 1; }
+
+  hs_prompt SERVER_A_PRIVATE_IP "Enter Server A IP (primary K3s / database host)"
+  [[ -n "${SERVER_A_PRIVATE_IP}" ]] || exit 1
+
+  hs_prompt_secret MYSQL_ROOT_PASSWORD "MySQL root password (must match primary)"
+  hs_prompt_secret POSTGRES_PASSWORD "PostgreSQL password (must match primary)"
+  hs_prompt_secret MONGO_ROOT_PASSWORD "MongoDB root password (must match primary)"
+  hs_prompt_secret REDIS_PASSWORD "Redis password (must match primary)"
+
+  hs_prompt INSTALL_DIR "Install directory (will be created)"
+  [[ -n "${INSTALL_DIR}" ]] || exit 1
+
+  echo ""
+  echo "Will write: ${INSTALL_DIR}/.env and docker-compose.yml"
+  hs_confirm "Proceed?" || exit 0
+
+  mkdir -p "${INSTALL_DIR}"
+  cp "${SHARE}/docker-compose.yml" "${INSTALL_DIR}/"
+  cat > "${INSTALL_DIR}/.env" <<EOF
+SERVER_A_PRIVATE_IP=${SERVER_A_PRIVATE_IP}
+MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+MONGO_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
+REDIS_PASSWORD=${REDIS_PASSWORD}
+EOF
+  chmod 600 "${INSTALL_DIR}/.env"
+  echo "Created ${INSTALL_DIR}. Run: himosoft-server-b-replica start"
+  echo "Configure replication on primary before relying on these containers."
+}
+
+cmd_start() {
+  hs_require_root
+  hs_prompt DIR "Enter install directory" 
+  [[ -d "${DIR}" ]] || { echo "Directory not found."; exit 1; }
+  docker compose -f "${DIR}/docker-compose.yml" --env-file "${DIR}/.env" up -d
+}
+
+cmd_status() {
+  hs_prompt DIR "Enter install directory"
+  docker compose -f "${DIR}/docker-compose.yml" --env-file "${DIR}/.env" ps 2>/dev/null || echo "Not running"
+}
+
+main() {
+  case "${1:-init}" in
+    init) cmd_init ;;
+    start) cmd_start ;;
+    status) cmd_status ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+main "$@"

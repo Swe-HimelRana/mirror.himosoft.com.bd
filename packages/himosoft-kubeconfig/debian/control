@@ -1,0 +1,9 @@
+Package: himosoft-kubeconfig
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: curl, ca-certificates
+Maintainer: Himosoft <admin@himosoft.com.bd>
+Description: Himosoft kubeconfig — export K3s kubeconfig for remote access
+ Prompts for server address and output path — no automatic IP detection.

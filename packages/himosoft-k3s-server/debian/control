@@ -1,0 +1,11 @@
+Package: himosoft-k3s-server
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: curl, ca-certificates
+Maintainer: Himosoft <admin@himosoft.com.bd>
+Description: Himosoft K3s Server — interactive K3s setup for Linux servers
+ Installs the himosoft-k3s-server command for preparing Ubuntu/Debian
+ servers as K3s nodes. Auto-detects public IP, prompts for domain
+ and options, installs K3s with bundled Traefik disabled.

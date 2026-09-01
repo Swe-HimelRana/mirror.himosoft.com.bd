@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONF="/etc/himosoft/k3s-server.conf"
+SHARE="/usr/share/himosoft-k3s-server"
+# shellcheck source=/dev/null
+source /usr/share/himosoft/lib/interactive.sh
+
+usage() {
+  cat <<'EOF'
+Himosoft K3s Server — interactive K3s setup
+
+Usage:
+  himosoft-k3s-server install
+  himosoft-k3s-server status
+  himosoft-k3s-server help
+
+All values are entered at the prompt — nothing is pre-filled automatically.
+Config: /etc/himosoft/k3s-server.conf
+EOF
+}
+
+load_conf() {
+  [[ -f "${CONF}" ]] && source "${CONF}"
+}
+
+save_conf() {
+  mkdir -p /etc/himosoft
+  cat > "${CONF}" <<EOF
+# Himosoft K3s Server — $(date -Iseconds)
+PUBLIC_IP="${PUBLIC_IP}"
+DOMAIN="${DOMAIN}"
+K3S_VERSION="${K3S_VERSION}"
+EOF
+  chmod 600 "${CONF}"
+}
+
+cmd_install() {
+  hs_require_root
+  hs_banner "Himosoft K3s Server"
+
+  hs_prompt PUBLIC_IP "Enter public IPv4"
+  [[ -n "${PUBLIC_IP}" ]] || { echo "Public IP is required."; exit 1; }
+
+  hs_prompt DOMAIN "Enter domain for K3s TLS SAN"
+  [[ -n "${DOMAIN}" ]] || { echo "Domain is required."; exit 1; }
+
+  hs_prompt_optional K3S_VERSION "K3s version (empty = latest from get.k3s.io)"
+
+  echo ""
+  echo "Summary:"
+  echo "  Public IP : ${PUBLIC_IP}"
+  echo "  Domain    : ${DOMAIN}"
+  echo "  K3s       : ${K3S_VERSION:-latest}"
+  echo "  Traefik   : disabled"
+  echo ""
+
+  hs_confirm "Proceed with K3s installation?" || { echo "Aborted."; exit 0; }
+
+  save_conf
+  export PUBLIC_IP DOMAIN K3S_VERSION
+  exec "${SHARE}/k3s-install.sh"
+}
+
+cmd_status() {
+  echo "=== Himosoft K3s Server ==="
+  [[ -f "${CONF}" ]] && cat "${CONF}" || echo "(not configured)"
+  command -v k3s >/dev/null && k3s kubectl get nodes 2>/dev/null || echo "K3s: not running"
+}
+
+main() {
+  case "${1:-install}" in
+    install) cmd_install ;;
+    status) cmd_status ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+  esac
+}
+
+if [[ $# -eq 0 ]] && [[ "${EUID}" -ne 0 ]]; then
+  usage
+  echo ""; echo "Run: sudo himosoft-k3s-server install"
+  exit 0
+fi
+
+main "$@"

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="HimoSoft Linux Mirror — official APT repository for all HimoSoft server and infrastructure packages">
+  <title>HimoSoft Linux Mirror — mirror.himosoft.com.bd</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+  <link rel="icon" href="https://himosoft.com.bd/shortlogo.png" type="image/png">
+</head>
+<body>
+  <header>
+    <div class="container">
+      <a class="site-brand" href="/">
+        <img src="https://himosoft.com.bd/shortlogo.png" width="40" height="40" alt="HimoSoft">
+        <span class="site-brand-text">
+          <span class="site-brand-name">HimoSoft Linux Mirror</span>
+          <span class="site-brand-tag">mirror.himosoft.com.bd</span>
+        </span>
+      </a>
+      <nav>
+        <a href="#packages">Packages</a>
+        <a href="#install">Install</a>
+        <a href="packages.json">packages.json</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <div class="badge">APT · Debian · Ubuntu</div>
+        <h1>Official HimoSoft Linux package mirror</h1>
+        <p>
+          One APT source for all HimoSoft packages — server setup,
+          monitoring, devops tools, and more. Browse the catalog below
+          or install any package with <code>apt install</code>.
+        </p>
+        <div class="code-block loading" data-hero-commands>
+          Loading install commands…
+        </div>
+      </div>
+    </section>
+
+    <section id="packages">
+      <div class="container">
+        <h2>Packages</h2>
+        <p class="meta-bar" data-packages-meta>Loading package index…</p>
+        <div class="grid loading" data-packages-grid>
+          Loading packages…
+        </div>
+      </div>
+    </section>
+
+    <section id="install">
+      <div class="container">
+        <h2>How to use this mirror</h2>
+        <ol class="steps">
+          <li>
+            <strong>Add the mirror once</strong>
+            Run the install script or add the APT source to your server.
+          </li>
+          <li>
+            <strong>Pick a package</strong>
+            Browse the catalog above — each card shows the install command.
+          </li>
+          <li>
+            <strong>Install with APT</strong>
+            <code>sudo apt update &amp;&amp; sudo apt install &lt;package-name&gt;</code>
+          </li>
+          <li>
+            <strong>Follow package docs</strong>
+            Some packages include a setup command (e.g. <code>himosoft-k3s-server install</code>).
+            Others are ready after install.
+          </li>
+        </ol>
+
+        <div class="code-block" style="margin-top: 2rem;">
+          <div class="comment"># APT source</div>
+          <div>deb [trusted=yes] https://mirror.himosoft.com.bd stable main</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="site-brand" href="/">
+            <img src="https://himosoft.com.bd/shortlogo.png" width="36" height="36" alt="HimoSoft">
+            <span class="site-brand-text">
+              <span class="site-brand-name">HimoSoft Linux Mirror</span>
+              <span class="site-brand-tag">Software &amp; IT solutions</span>
+            </span>
+          </a>
+          <p>
+            Official Debian/Ubuntu APT mirror for all HimoSoft packages —
+            infrastructure tools, server setup, monitoring, and more.
+          </p>
+          <p class="license">Government Registered License: TRADE-16247-100-8113</p>
+        </div>
+
+        <div class="footer-col">
+          <h4>Mirror</h4>
+          <ul>
+            <li><a href="#packages">Packages</a></li>
+            <li><a href="packages.json">packages.json</a></li>
+            <li><a href="dists/stable/main/binary-amd64/Packages">APT index</a></li>
+            <li><a href="install-mirror.sh">install-mirror.sh</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4>Resources</h4>
+          <ul>
+            <li><a href="#packages">Package catalog</a></li>
+            <li><a href="#install">Install instructions</a></li>
+            <li><a href="https://himosoft.com.bd/#contact">Contact support</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4>Company</h4>
+          <ul>
+            <li><a href="https://himosoft.com.bd/">HimoSoft.com.bd</a></li>
+            <li><a href="https://himosoft.com.bd/#about">About</a></li>
+            <li><a href="https://himosoft.com.bd/#contact">Contact</a></li>
+            <li><a href="https://himosoft.com.bd/privacy">Privacy Policy</a></li>
+            <li><a href="https://himosoft.com.bd/terms">Terms of Service</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div>
+          <span class="footer-status">Mirror operational</span>
+          <span style="margin-left: 0.75rem;">© 2026 HimoSoft. All rights reserved.</span>
+        </div>
+        <div class="footer-bottom-links">
+          <a href="https://himosoft.com.bd/privacy">Privacy</a>
+          <a href="https://himosoft.com.bd/terms">Terms</a>
+          <a href="https://himosoft.com.bd/cookies">Cookies</a>
+          <a href="https://himosoft.com.bd/">Main site</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="assets/js/packages.js"></script>
+</body>
+</html>
