@@ -3,7 +3,7 @@ Version: 1.0.0
 Section: admin
 Priority: optional
 Architecture: all
-Depends: curl, ca-certificates
+Depends: curl, ca-certificates, himosoft-common
 Maintainer: Himosoft <admin@himosoft.com.bd>
 Description: Himosoft Server B replica stack — interactive Docker Compose setup
  Prompts for primary server IP and database credentials before writing .env.

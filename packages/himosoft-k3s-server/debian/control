@@ -3,7 +3,7 @@ Version: 1.0.0
 Section: admin
 Priority: optional
 Architecture: all
-Depends: curl, ca-certificates
+Depends: curl, ca-certificates, himosoft-common
 Maintainer: Himosoft <admin@himosoft.com.bd>
 Description: Himosoft K3s Server — interactive K3s setup for Linux servers
  Installs the himosoft-k3s-server command for preparing Ubuntu/Debian

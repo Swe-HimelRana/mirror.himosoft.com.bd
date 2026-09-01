@@ -1,0 +1,9 @@
+Package: himosoft-common
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: curl, ca-certificates
+Maintainer: Himosoft <mirror@himosoft.com.bd>
+Description: Himosoft shared library — interactive prompt helpers
+ Used by other himosoft-* packages. Do not install directly unless needed.

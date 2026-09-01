@@ -13,22 +13,25 @@ LIB="${ROOT}/packages/_lib/interactive.sh"
 [[ -d "${PKG_DIR}" ]] || { echo "Missing ${PKG_DIR}"; exit 1; }
 
 rm -rf "${BUILD_ROOT}"
-mkdir -p "${STAGING}/DEBIAN" "${STAGING}/usr/bin"
+mkdir -p "${STAGING}/DEBIAN"
 
 cp "${PKG_DIR}/debian/control" "${STAGING}/DEBIAN/"
 [[ -f "${PKG_DIR}/debian/postinst" ]] && cp "${PKG_DIR}/debian/postinst" "${STAGING}/DEBIAN/" && chmod 755 "${STAGING}/DEBIAN/postinst"
 
-cp "${PKG_DIR}/src/usr/bin/${PKG_NAME}" "${STAGING}/usr/bin/"
-chmod 755 "${STAGING}/usr/bin/${PKG_NAME}"
+if [[ "${PKG_NAME}" == "himosoft-common" ]]; then
+  mkdir -p "${STAGING}/usr/share/himosoft/lib"
+  cp "${LIB}" "${STAGING}/usr/share/himosoft/lib/interactive.sh"
+else
+  mkdir -p "${STAGING}/usr/bin"
+  cp "${PKG_DIR}/src/usr/bin/${PKG_NAME}" "${STAGING}/usr/bin/"
+  chmod 755 "${STAGING}/usr/bin/${PKG_NAME}"
 
-if [[ -d "${PKG_DIR}/src/usr/share/${PKG_NAME}" ]]; then
-  mkdir -p "${STAGING}/usr/share/${PKG_NAME}"
-  cp -r "${PKG_DIR}/src/usr/share/${PKG_NAME}/." "${STAGING}/usr/share/${PKG_NAME}/"
-  find "${STAGING}/usr/share/${PKG_NAME}" -type f -name '*.sh' -exec chmod 755 {} +
+  if [[ -d "${PKG_DIR}/src/usr/share/${PKG_NAME}" ]]; then
+    mkdir -p "${STAGING}/usr/share/${PKG_NAME}"
+    cp -r "${PKG_DIR}/src/usr/share/${PKG_NAME}/." "${STAGING}/usr/share/${PKG_NAME}/"
+    find "${STAGING}/usr/share/${PKG_NAME}" -type f -name '*.sh' -exec chmod 755 {} +
+  fi
 fi
-
-mkdir -p "${STAGING}/usr/share/himosoft/lib"
-cp "${LIB}" "${STAGING}/usr/share/himosoft/lib/interactive.sh"
 
 dpkg-deb --build --root-owner-group "${STAGING}" "${BUILD_ROOT}/${PKG_NAME}_${VERSION}_all.deb"
 echo "Built: ${BUILD_ROOT}/${PKG_NAME}_${VERSION}_all.deb"

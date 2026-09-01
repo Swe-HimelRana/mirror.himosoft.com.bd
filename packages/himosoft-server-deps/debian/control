@@ -3,7 +3,7 @@ Version: 1.0.0
 Section: admin
 Priority: optional
 Architecture: all
-Depends: curl, ca-certificates
+Depends: curl, ca-certificates, himosoft-common
 Maintainer: Himosoft <admin@himosoft.com.bd>
 Description: Himosoft server dependencies — interactive ops CLI bundle
  Installs common server tools (curl, jq, gnupg, etc.) with confirmation

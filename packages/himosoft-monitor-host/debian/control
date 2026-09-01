@@ -3,7 +3,7 @@ Version: 1.0.0
 Section: admin
 Priority: optional
 Architecture: all
-Depends: curl, ca-certificates, gettext-base
+Depends: curl, ca-certificates, gettext-base, himosoft-common
 Maintainer: Himosoft <admin@himosoft.com.bd>
 Description: Himosoft monitor host — interactive Prometheus + Grafana stack
  Prompts for hosts, OAuth, and scrape targets before writing .env.
