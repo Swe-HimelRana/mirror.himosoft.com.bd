@@ -11,14 +11,24 @@ Himosoft Server Status — live system dashboard
 Usage:
   himosoft-server-status              Start live dashboard (auto-refresh)
   himosoft-server-status run          Same as above
+  himosoft-server-status snapshot     JSON metrics for scripts/monitoring
   himosoft-server-status configure    Set refresh interval (interactive)
   himosoft-server-status help
 
 Options (run):
   --interval SECONDS   Override refresh interval for this session
 
-Press Ctrl+C to quit the dashboard.
+Press q or Ctrl+C to quit the dashboard.
 EOF
+}
+
+require_python() {
+  command -v python3 >/dev/null || { echo "python3 not found." >&2; exit 1; }
+  python3 -c "import rich" 2>/dev/null || {
+    echo "python3-rich not found. Install: sudo apt install python3-rich" >&2
+    exit 1
+  }
+  [[ -f "${DASHBOARD}" ]] || { echo "Dashboard not found: ${DASHBOARD}" >&2; exit 1; }
 }
 
 load_interval() {
@@ -51,6 +61,11 @@ EOF
   echo "Saved. Run: himosoft-server-status"
 }
 
+cmd_snapshot() {
+  require_python
+  exec python3 "${DASHBOARD}" --snapshot
+}
+
 cmd_run() {
   local interval_override=""
 
@@ -68,20 +83,7 @@ cmd_run() {
     esac
   done
 
-  if ! command -v python3 >/dev/null; then
-    echo "python3 not found." >&2
-    exit 1
-  fi
-
-  if ! python3 -c "import rich" 2>/dev/null; then
-    echo "python3-rich not found. Install: sudo apt install python3-rich" >&2
-    exit 1
-  fi
-
-  if [[ ! -f "${DASHBOARD}" ]]; then
-    echo "Dashboard not found: ${DASHBOARD}" >&2
-    exit 1
-  fi
+  require_python
 
   local interval="${interval_override:-$(load_interval)}"
 
@@ -106,6 +108,7 @@ main() {
       [[ $# -gt 0 ]] && shift
       cmd_run "$@"
       ;;
+    snapshot) cmd_snapshot ;;
     configure) cmd_configure ;;
     help|-h|--help) usage ;;
     *) usage; exit 1 ;;

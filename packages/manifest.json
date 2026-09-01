@@ -142,7 +142,7 @@
     {
       "name": "himosoft-server-status",
       "title": "Live server dashboard",
-      "description": "Human-readable htop alternative — live CPU, memory, swap, disk, network charts; top apps by CPU and memory with PID.",
+      "description": "Live htop-style dashboard — CPU, memory, swap, disk I/O, TLS expiry, K3s alerts, JSON snapshot. Press q to quit.",
       "status": "available",
       "architecture": "all",
       "depends": ["python3", "python3-rich", "curl", "ca-certificates", "himosoft-common"],
