@@ -47,7 +47,7 @@ dpkg-scanpackages --arch amd64 pool/ > "${DIST}/binary-amd64/Packages"
 gzip -9 -c "${DIST}/binary-amd64/Packages" > "${DIST}/binary-amd64/Packages.gz"
 
 echo "==> Generating Release (with checksums)"
-apt-ftparchive release dists/stable > dists/stable/Release
+apt-ftparchive -c="${ROOT}/scripts/apt-ftparchive.conf" release dists/stable > dists/stable/Release
 
 echo "==> Generating packages.json"
 python3 "${ROOT}/scripts/generate-packages-json.py" "${SITE}"
