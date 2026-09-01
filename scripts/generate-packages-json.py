@@ -13,15 +13,25 @@ from pathlib import Path
 
 def deb_info(deb_path: Path) -> dict:
     out = subprocess.check_output(["dpkg-deb", "-I", str(deb_path)], text=True)
+    wanted = frozenset({"Package", "Version", "Architecture", "Installed-Size"})
     fields: dict[str, str] = {}
-    key = None
-    for line in out.splitlines():
-        if line.startswith(" ") and key:
-            fields[key] += " " + line.strip()
+    key: str | None = None
+    for raw in out.splitlines():
+        line = raw.strip()
+        if not line:
+            key = None
+            continue
+        if key and raw.startswith(" ") and ": " not in raw:
+            fields[key] += " " + line
         elif ": " in line:
-            key, val = line.split(": ", 1)
-            if key in ("Package", "Version", "Architecture", "Installed-Size"):
-                fields[key] = val.strip()
+            field, val = line.split(": ", 1)
+            if field in wanted:
+                key = field
+                fields[field] = val.strip()
+            else:
+                key = None
+        else:
+            key = None
     return fields
 
 
