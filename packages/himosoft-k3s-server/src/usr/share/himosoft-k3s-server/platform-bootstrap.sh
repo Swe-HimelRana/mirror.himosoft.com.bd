@@ -80,17 +80,18 @@ install_argocd() {
   log "Installing Argo CD"
   k create namespace argocd --dry-run=client -o yaml | k apply -f -
 
+  cleanup_argocd_from_default
+
   if deployment_ready argocd argocd-server; then
-    log "Argo CD already running — skipping manifest apply"
+    log "Argo CD already running in namespace argocd — skipping manifest apply"
     configure_argocd_ingress
     log "Argo CD ready"
     return 0
   fi
 
-  log "Applying Argo CD manifest (server-side apply)..."
-  k apply --server-side --force-conflicts -f "${ARGOCD_MANIFEST}"
+  log "Applying Argo CD manifest to namespace argocd (server-side apply)..."
+  k apply --server-side --force-conflicts -n argocd -f "${ARGOCD_MANIFEST}"
 
-  # SSA can take a few seconds before workloads appear in the API.
   sleep 5
 
   wait_for_deployment argocd argocd-server 600
@@ -130,6 +131,9 @@ print_summary() {
 
   if k get secret argocd-initial-admin-secret -n argocd >/dev/null 2>&1; then
     argocd_pass="$(k get secret argocd-initial-admin-secret -n argocd \
+      -o jsonpath='{.data.password}' | base64 -d 2>/dev/null || true)"
+  elif k get secret argocd-initial-admin-secret -n default >/dev/null 2>&1; then
+    argocd_pass="$(k get secret argocd-initial-admin-secret -n default \
       -o jsonpath='{.data.password}' | base64 -d 2>/dev/null || true)"
   fi
 

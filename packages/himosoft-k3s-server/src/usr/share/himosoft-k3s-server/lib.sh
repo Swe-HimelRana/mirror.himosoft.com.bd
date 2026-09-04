@@ -98,3 +98,37 @@ apply_template() {
     -e "s|@TRAEFIK_FQDN@|${TRAEFIK_FQDN}|g" \
     "${template}"
 }
+
+# Argo CD install.yaml requires -n argocd; without it workloads land in default.
+cleanup_argocd_from_default() {
+  if ! k get deployment argocd-server -n default >/dev/null 2>&1; then
+    return 0
+  fi
+  warn "Argo CD is in namespace 'default' (must be 'argocd') — removing misplaced install"
+  local kind res
+  for kind in deployment statefulset service secret configmap role rolebinding networkpolicy serviceaccount; do
+    k get "${kind}" -n default -o name 2>/dev/null | grep argocd | while read -r res; do
+      k delete "${res}" -n default --ignore-not-found --wait=false 2>/dev/null || true
+    done
+  done
+  log "Waiting for default-namespace Argo CD pods to terminate..."
+  local i
+  for i in $(seq 1 30); do
+    if ! k get pods -n default 2>/dev/null | grep -q argocd; then
+      return 0
+    fi
+    sleep 2
+  done
+}
+
+argocd_admin_password() {
+  if k get secret argocd-initial-admin-secret -n argocd >/dev/null 2>&1; then
+    k get secret argocd-initial-admin-secret -n argocd \
+      -o jsonpath='{.data.password}' | base64 -d 2>/dev/null || true
+    return 0
+  fi
+  if k get secret argocd-initial-admin-secret -n default >/dev/null 2>&1; then
+    k get secret argocd-initial-admin-secret -n default \
+      -o jsonpath='{.data.password}' | base64 -d 2>/dev/null || true
+  fi
+}

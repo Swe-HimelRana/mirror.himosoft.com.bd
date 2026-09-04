@@ -15,6 +15,7 @@ Usage:
   himosoft-k3s-server install          K3s + Traefik + Argo CD + dashboards
   himosoft-k3s-server configure        Same as install
   himosoft-k3s-server bootstrap        Platform only (K3s must already run)
+  himosoft-k3s-server repair           Fix Argo CD in wrong namespace + re-bootstrap
   himosoft-k3s-server status           Cluster, URLs, and pod summary
   himosoft-k3s-server credentials      Argo CD password + dashboard token
   himosoft-k3s-server help
@@ -209,6 +210,22 @@ cmd_status() {
   fi
 }
 
+cmd_repair() {
+  hs_require_root
+  require_share_files
+  hs_banner "Repair misplaced Argo CD"
+  load_conf 2>/dev/null || true
+  if [[ ! -f "${CONF}" ]]; then
+    echo "No saved config. Run: sudo himosoft-k3s-server install"
+    exit 1
+  fi
+  export PUBLIC_IP DOMAIN K3S_VERSION ARGOCD_FQDN DASH_FQDN TRAEFIK_FQDN
+  # shellcheck source=/dev/null
+  source "${SHARE}/lib.sh"
+  cleanup_argocd_from_default
+  exec "${SHARE}/platform-bootstrap.sh"
+}
+
 cmd_credentials() {
   hs_require_root
   if ! command -v k3s >/dev/null 2>&1; then
@@ -225,6 +242,14 @@ cmd_credentials() {
     echo "  Username: admin"
     echo -n "  Password: "
     k3s kubectl get secret argocd-initial-admin-secret -n argocd \
+      -o jsonpath='{.data.password}' | base64 -d
+    echo ""
+    echo ""
+  elif k3s kubectl get secret argocd-initial-admin-secret -n default >/dev/null 2>&1; then
+    echo "Argo CD — https://${ARGOCD_FQDN:-acd.<your-domain>} (currently in default namespace — run repair)"
+    echo "  Username: admin"
+    echo -n "  Password: "
+    k3s kubectl get secret argocd-initial-admin-secret -n default \
       -o jsonpath='{.data.password}' | base64 -d
     echo ""
     echo ""
@@ -251,6 +276,7 @@ main() {
   case "${1:-install}" in
     install|configure) cmd_install ;;
     bootstrap) cmd_bootstrap ;;
+    repair) cmd_repair ;;
     status) cmd_status ;;
     credentials) cmd_credentials ;;
     help|-h|--help) usage ;;
