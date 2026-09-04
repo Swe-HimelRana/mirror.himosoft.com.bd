@@ -23,9 +23,31 @@ ARGOCD_MANIFEST="https://raw.githubusercontent.com/argoproj/argo-cd/stable/manif
 DASHBOARD_MANIFEST="https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml"
 TRAEFIK_CHART_VERSION="${TRAEFIK_CHART_VERSION:-}"
 
+configure_argocd_ingress() {
+  log "Configuring Argo CD for Traefik ingress"
+  k patch configmap argocd-cm -n argocd --type merge -p "$(cat <<EOF
+{
+  "data": {
+    "url": "https://${ARGOCD_FQDN}",
+    "server.insecure": "true",
+    "application.resourceTrackingMethod": "annotation"
+  }
+}
+EOF
+)" 2>/dev/null || true
+  if k get deployment argocd-server -n argocd >/dev/null 2>&1; then
+    k rollout restart deployment/argocd-server -n argocd 2>/dev/null || true
+    wait_for_deployment argocd argocd-server 300 || true
+  fi
+}
+
 install_traefik() {
   if helm status traefik -n traefik >/dev/null 2>&1; then
-    log "Traefik Helm release exists — upgrading"
+    if k get pods -n traefik -l app.kubernetes.io/name=traefik --field-selector=status.phase=Running 2>/dev/null | grep -q traefik; then
+      log "Traefik already running — refreshing values"
+    else
+      log "Traefik release exists but pods not ready — upgrading"
+    fi
   else
     log "Installing Traefik ingress controller"
   fi
@@ -50,39 +72,47 @@ install_traefik() {
   fi
 
   helm "${helm_args[@]}"
-  wait_rollout traefik deployment traefik
+  wait_for_deployment traefik traefik 300
   log "Traefik ready"
 }
 
 install_argocd() {
   log "Installing Argo CD"
   k create namespace argocd --dry-run=client -o yaml | k apply -f -
+
+  if deployment_ready argocd argocd-server; then
+    log "Argo CD already running — skipping manifest apply"
+    configure_argocd_ingress
+    log "Argo CD ready"
+    return 0
+  fi
+
+  log "Applying Argo CD manifest (server-side apply)..."
   k apply --server-side --force-conflicts -f "${ARGOCD_MANIFEST}"
 
-  wait_rollout argocd deployment argocd-server
-  wait_rollout argocd deployment argocd-repo-server
-  wait_pods_ready argocd app.kubernetes.io/name=argocd-application-controller || true
+  # SSA can take a few seconds before workloads appear in the API.
+  sleep 5
 
-  log "Configuring Argo CD for Traefik ingress"
-  k patch configmap argocd-cm -n argocd --type merge -p "$(cat <<EOF
-{
-  "data": {
-    "url": "https://${ARGOCD_FQDN}",
-    "server.insecure": "true",
-    "application.resourceTrackingMethod": "annotation"
-  }
-}
-EOF
-)"
-  k rollout restart deployment/argocd-server -n argocd
-  wait_rollout argocd deployment argocd-server
+  wait_for_deployment argocd argocd-server 600
+  wait_for_deployment argocd argocd-repo-server 600
+  wait_for_statefulset argocd argocd-application-controller 600 || true
+  wait_for_deployment argocd argocd-applicationset-controller 300 || true
+
+  configure_argocd_ingress
   log "Argo CD ready"
 }
 
 install_k8s_dashboard() {
+  if deployment_ready kubernetes-dashboard kubernetes-dashboard; then
+    log "Kubernetes Dashboard already running"
+    k apply -f "${SHARE}/manifests/dashboard-admin.yaml"
+    return 0
+  fi
+
   log "Installing Kubernetes Dashboard"
   k apply -f "${DASHBOARD_MANIFEST}"
-  wait_rollout kubernetes-dashboard deployment kubernetes-dashboard
+  sleep 3
+  wait_for_deployment kubernetes-dashboard kubernetes-dashboard 600
   k apply -f "${SHARE}/manifests/dashboard-admin.yaml"
   log "Kubernetes Dashboard ready"
 }
@@ -119,20 +149,20 @@ DNS — point these A records to ${PUBLIC_IP}:
   ${TRAEFIK_FQDN}
 
 URLs (HTTPS via Traefik default cert until cert-manager):
-  Argo CD             https://${ARGOCD_FQDN}
+  Argo CD              https://${ARGOCD_FQDN}
   Kubernetes Dashboard https://${DASH_FQDN}
-  Traefik Dashboard   https://${TRAEFIK_FQDN}/dashboard/
+  Traefik Dashboard    https://${TRAEFIK_FQDN}/dashboard/
 
 Argo CD login:
   Username : admin
   Password : ${argocd_pass:-<run: himosoft-k3s-server credentials>}
 
 Kubernetes Dashboard login:
-  Use token from: himosoft-k3s-server credentials
+  Select "Token" and run: sudo himosoft-k3s-server credentials
 
 Verify:
   k3s kubectl get pods -A
-  himosoft-k3s-server status
+  sudo himosoft-k3s-server status
 
 GitOps note:
   Traefik is pre-installed by this package. When deploying Phase 2 from
@@ -146,7 +176,7 @@ Firewall:
 EOF
 
   if [[ -n "${dashboard_token}" ]]; then
-    echo "Dashboard token (also saved via credentials command):"
+    echo "Dashboard token:"
     echo "${dashboard_token}"
     echo ""
   fi

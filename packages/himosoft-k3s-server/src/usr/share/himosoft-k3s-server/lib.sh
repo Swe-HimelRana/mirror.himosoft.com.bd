@@ -12,6 +12,10 @@ log() {
   echo "==> $*"
 }
 
+warn() {
+  echo "==> WARNING: $*" >&2
+}
+
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || return 1
 }
@@ -36,9 +40,49 @@ wait_for_k3s() {
   return 1
 }
 
-wait_rollout() {
-  local ns="$1" kind="$2" name="$3"
-  k rollout status "${kind}/${name}" -n "${ns}" --timeout=600s
+# Poll until a workload exists, then wait for rollout (handles SSA apply race).
+wait_for_deployment() {
+  local ns="$1" name="$2" max_wait="${3:-600}"
+  local elapsed=0
+  log "Waiting for deployment/${name} in ${ns}..."
+  while (( elapsed < max_wait )); do
+    if k get deployment "${name}" -n "${ns}" >/dev/null 2>&1; then
+      if k rollout status "deployment/${name}" -n "${ns}" --timeout=120s; then
+        return 0
+      fi
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+  warn "deployment/${name} not ready in namespace ${ns}"
+  k get deploy,pods -n "${ns}" 2>/dev/null || true
+  return 1
+}
+
+wait_for_statefulset() {
+  local ns="$1" name="$2" max_wait="${3:-600}"
+  local elapsed=0
+  log "Waiting for statefulset/${name} in ${ns}..."
+  while (( elapsed < max_wait )); do
+    if k get statefulset "${name}" -n "${ns}" >/dev/null 2>&1; then
+      if k rollout status "statefulset/${name}" -n "${ns}" --timeout=120s; then
+        return 0
+      fi
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+  warn "statefulset/${name} not ready in namespace ${ns}"
+  k get sts,pods -n "${ns}" 2>/dev/null || true
+  return 1
+}
+
+deployment_ready() {
+  local ns="$1" name="$2"
+  local ready desired
+  ready="$(k get deployment "${name}" -n "${ns}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)"
+  desired="$(k get deployment "${name}" -n "${ns}" -o jsonpath='{.status.replicas}' 2>/dev/null || echo 0)"
+  [[ -n "${ready}" && -n "${desired}" && "${ready}" -ge 1 && "${ready}" == "${desired}" ]]
 }
 
 wait_pods_ready() {

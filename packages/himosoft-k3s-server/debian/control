@@ -1,5 +1,5 @@
 Package: himosoft-k3s-server
-Version: 1.1.0
+Version: 1.1.2
 Section: admin
 Priority: optional
 Architecture: all

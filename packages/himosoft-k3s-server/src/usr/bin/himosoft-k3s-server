@@ -11,22 +11,49 @@ usage() {
 Himosoft K3s Server — interactive K3s + platform bootstrap
 
 Usage:
-  himosoft-k3s-server install       K3s + Traefik + Argo CD + dashboards
-  himosoft-k3s-server bootstrap      Platform only (K3s must already run)
-  himosoft-k3s-server status          Cluster and URL summary
-  himosoft-k3s-server credentials     Show Argo CD password and dashboard token
+  himosoft-k3s-server                 Same as install (interactive setup)
+  himosoft-k3s-server install          K3s + Traefik + Argo CD + dashboards
+  himosoft-k3s-server configure        Same as install
+  himosoft-k3s-server bootstrap        Platform only (K3s must already run)
+  himosoft-k3s-server status           Cluster, URLs, and pod summary
+  himosoft-k3s-server credentials      Argo CD password + dashboard token
   himosoft-k3s-server help
 
-Installs:
-  - K3s server (bundled Traefik disabled)
-  - Traefik ingress (Helm)
-  - Argo CD at acd.<your-domain>
-  - Kubernetes Dashboard at dash.<your-domain>
-  - Traefik dashboard at traefik.<your-domain>
+You will be prompted for:
+  - Server public IP
+  - Base domain
+  - Hostname for Argo CD          (default: acd.<domain>)
+  - Hostname for Kubernetes Dash  (default: dash.<domain>)
+  - Hostname for Traefik Dash     (default: traefik.<domain>)
 
-All values are entered at the prompt — nothing is pre-filled automatically.
 Config: /etc/himosoft/k3s-server.conf
 EOF
+}
+
+print_access_guide() {
+  local ip="${1:-YOUR_SERVER_IP}"
+  cat <<EOF
+
+┌──────────────────────────────────────────────────────────────┐
+│  After setup, access your services at:                       │
+├──────────────────────────────────────────────────────────────┤
+│  Argo CD              https://acd.<your-domain>              │
+│  Kubernetes Dashboard https://dash.<your-domain>             │
+│  Traefik Dashboard    https://traefik.<your-domain>/dashboard/ │
+├──────────────────────────────────────────────────────────────┤
+│  DNS: point each hostname A record → ${ip}                   │
+│  Credentials: sudo himosoft-k3s-server credentials           │
+│  Status:      sudo himosoft-k3s-server status               │
+└──────────────────────────────────────────────────────────────┘
+
+EOF
+}
+
+hs_prompt_default() {
+  local var_name="$1" question="$2" default="$3"
+  local input
+  read -r -p "${question} [${default}]: " input
+  printf -v "${var_name}" '%s' "${input:-${default}}"
 }
 
 load_conf() {
@@ -50,36 +77,68 @@ EOF
   chmod 600 "${CONF}"
 }
 
+require_share_files() {
+  local missing=0
+  for f in k3s-install.sh platform-bootstrap.sh lib.sh; do
+    if [[ ! -f "${SHARE}/${f}" ]]; then
+      echo "Missing ${SHARE}/${f} — reinstall: apt install --reinstall himosoft-k3s-server" >&2
+      missing=1
+    fi
+  done
+  [[ "${missing}" -eq 0 ]] || exit 1
+}
+
 prompt_install_config() {
-  hs_prompt PUBLIC_IP "Enter public IPv4"
+  echo "Step 1 — Server network"
+  echo "────────────────────────"
+  hs_prompt PUBLIC_IP "Enter server public IPv4"
   [[ -n "${PUBLIC_IP}" ]] || { echo "Public IP is required."; exit 1; }
 
   hs_prompt DOMAIN "Enter base domain (e.g. srv1.himosoft.com.bd)"
   [[ -n "${DOMAIN}" ]] || { echo "Base domain is required."; exit 1; }
 
-  ARGOCD_FQDN="acd.${DOMAIN}"
-  DASH_FQDN="dash.${DOMAIN}"
-  TRAEFIK_FQDN="traefik.${DOMAIN}"
+  echo ""
+  echo "Step 2 — Service hostnames (FQDN for each web UI)"
+  echo "──────────────────────────────────────────────────"
+  echo "Press Enter to accept the default shown in [brackets]."
+  echo ""
+  hs_prompt_default ARGOCD_FQDN "Argo CD hostname" "acd.${DOMAIN}"
+  hs_prompt_default DASH_FQDN "Kubernetes Dashboard hostname" "dash.${DOMAIN}"
+  hs_prompt_default TRAEFIK_FQDN "Traefik dashboard hostname" "traefik.${DOMAIN}"
 
+  echo ""
+  echo "Step 3 — K3s version (optional)"
+  echo "──────────────────────────────"
   hs_prompt_optional K3S_VERSION "K3s version (empty = latest from get.k3s.io)"
 
   echo ""
-  echo "Summary:"
-  echo "  Public IP         : ${PUBLIC_IP}"
-  echo "  Base domain       : ${DOMAIN}"
-  echo "  Argo CD URL       : https://${ARGOCD_FQDN}"
-  echo "  K8s Dashboard URL : https://${DASH_FQDN}"
-  echo "  Traefik URL       : https://${TRAEFIK_FQDN}/dashboard/"
-  echo "  K3s version       : ${K3S_VERSION:-latest}"
+  echo "══════════════════════════════════════════════════"
+  echo "  Summary"
+  echo "══════════════════════════════════════════════════"
+  echo "  Public IP              : ${PUBLIC_IP}"
+  echo "  Base domain            : ${DOMAIN}"
+  echo ""
+  echo "  Argo CD                : https://${ARGOCD_FQDN}"
+  echo "  Kubernetes Dashboard   : https://${DASH_FQDN}"
+  echo "  Traefik Dashboard      : https://${TRAEFIK_FQDN}/dashboard/"
+  echo ""
+  echo "  K3s version            : ${K3S_VERSION:-latest}"
+  echo ""
+  echo "  DNS — create A records pointing to ${PUBLIC_IP}:"
+  echo "    ${ARGOCD_FQDN}"
+  echo "    ${DASH_FQDN}"
+  echo "    ${TRAEFIK_FQDN}"
+  echo "══════════════════════════════════════════════════"
   echo ""
 }
 
 cmd_install() {
   hs_require_root
-  hs_banner "Himosoft K3s Server"
+  require_share_files
+  hs_banner "Himosoft K3s Server — interactive setup"
 
   prompt_install_config
-  hs_confirm "Proceed with K3s and platform installation?" || { echo "Aborted."; exit 0; }
+  hs_confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
 
   save_conf
   export PUBLIC_IP DOMAIN K3S_VERSION ARGOCD_FQDN DASH_FQDN TRAEFIK_FQDN
@@ -88,15 +147,18 @@ cmd_install() {
 
 cmd_bootstrap() {
   hs_require_root
+  require_share_files
   hs_banner "Platform bootstrap"
 
   if [[ -f "${CONF}" ]]; then
     load_conf
     echo "Using saved config from ${CONF}:"
-    echo "  Domain     : ${DOMAIN}"
-    echo "  Argo CD    : https://${ARGOCD_FQDN}"
-    echo "  Dashboard  : https://${DASH_FQDN}"
-    echo "  Traefik    : https://${TRAEFIK_FQDN}/dashboard/"
+    echo "  Public IP  : ${PUBLIC_IP}"
+    echo "  Base domain: ${DOMAIN}"
+    echo ""
+    echo "  Argo CD                : https://${ARGOCD_FQDN}"
+    echo "  Kubernetes Dashboard   : https://${DASH_FQDN}"
+    echo "  Traefik Dashboard      : https://${TRAEFIK_FQDN}/dashboard/"
     echo ""
     hs_confirm "Re-run platform bootstrap with saved settings?" || { echo "Aborted."; exit 0; }
   else
@@ -117,16 +179,20 @@ cmd_bootstrap() {
 cmd_status() {
   echo "=== Himosoft K3s Server ==="
   if [[ -f "${CONF}" ]]; then
+    load_conf
+    echo ""
+    echo "Configured URLs:"
+    echo "  Argo CD              : https://${ARGOCD_FQDN}"
+    echo "  Kubernetes Dashboard : https://${DASH_FQDN}"
+    echo "  Traefik Dashboard    : https://${TRAEFIK_FQDN}/dashboard/"
+    echo ""
+    echo "Config file (${CONF}):"
     cat "${CONF}"
     echo ""
-    load_conf
-    echo "URLs:"
-    echo "  Argo CD             https://${ARGOCD_FQDN:-?}"
-    echo "  Kubernetes Dashboard https://${DASH_FQDN:-?}"
-    echo "  Traefik Dashboard   https://${TRAEFIK_FQDN:-?}/dashboard/"
-    echo ""
   else
-    echo "(not configured — run: sudo himosoft-k3s-server install)"
+    echo "(not configured yet)"
+    print_access_guide
+    echo "Run: sudo himosoft-k3s-server install"
     echo ""
   fi
 
@@ -135,27 +201,27 @@ cmd_status() {
     k3s kubectl get nodes 2>/dev/null || true
     echo ""
     echo "Platform pods:"
-    k3s kubectl get pods -n traefik 2>/dev/null || true
-    k3s kubectl get pods -n argocd 2>/dev/null || true
-    k3s kubectl get pods -n kubernetes-dashboard 2>/dev/null || true
+    k3s kubectl get pods -n traefik 2>/dev/null || echo "  traefik: not deployed"
+    k3s kubectl get pods -n argocd 2>/dev/null || echo "  argocd: not deployed"
+    k3s kubectl get pods -n kubernetes-dashboard 2>/dev/null || echo "  kubernetes-dashboard: not deployed"
   else
-    echo "K3s: not running"
+    echo "K3s: not running — run: sudo himosoft-k3s-server install"
   fi
 }
 
 cmd_credentials() {
   hs_require_root
   if ! command -v k3s >/dev/null 2>&1; then
-    echo "K3s not installed."
+    echo "K3s not installed. Run: sudo himosoft-k3s-server install"
     exit 1
   fi
 
-  load_conf
+  load_conf 2>/dev/null || true
   echo "=== Credentials ==="
   echo ""
 
   if k3s kubectl get secret argocd-initial-admin-secret -n argocd >/dev/null 2>&1; then
-    echo "Argo CD (https://${ARGOCD_FQDN:-acd.example.com})"
+    echo "Argo CD — https://${ARGOCD_FQDN:-acd.<your-domain>}"
     echo "  Username: admin"
     echo -n "  Password: "
     k3s kubectl get secret argocd-initial-admin-secret -n argocd \
@@ -163,24 +229,27 @@ cmd_credentials() {
     echo ""
     echo ""
   else
-    echo "Argo CD: not installed or secret missing"
+    echo "Argo CD: not installed yet"
     echo ""
   fi
 
   if k3s kubectl get sa himosoft-dashboard-admin -n kubernetes-dashboard >/dev/null 2>&1; then
-    echo "Kubernetes Dashboard (https://${DASH_FQDN:-dash.example.com})"
-    echo "  Login method: Token"
+    echo "Kubernetes Dashboard — https://${DASH_FQDN:-dash.<your-domain>}"
+    echo "  Login: select Token, paste below"
     echo "  Token:"
     k3s kubectl -n kubernetes-dashboard create token himosoft-dashboard-admin --duration=8760h
     echo ""
   else
-    echo "Kubernetes Dashboard: not installed or admin SA missing"
+    echo "Kubernetes Dashboard: not installed yet"
+    echo ""
   fi
+
+  echo "Traefik Dashboard — https://${TRAEFIK_FQDN:-traefik.<your-domain>}/dashboard/"
 }
 
 main() {
   case "${1:-install}" in
-    install) cmd_install ;;
+    install|configure) cmd_install ;;
     bootstrap) cmd_bootstrap ;;
     status) cmd_status ;;
     credentials) cmd_credentials ;;
@@ -191,9 +260,14 @@ main() {
 
 if [[ $# -eq 0 ]] && [[ "${EUID}" -ne 0 ]]; then
   usage
-  echo ""
+  print_access_guide
   echo "Run: sudo himosoft-k3s-server install"
   exit 0
+fi
+
+if [[ $# -eq 0 ]] && [[ "${EUID}" -eq 0 ]]; then
+  echo "Starting interactive K3s setup..."
+  echo ""
 fi
 
 main "$@"

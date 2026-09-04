@@ -1,3 +1,20 @@
+himosoft-k3s-server (1.1.2) stable; urgency=medium
+
+  * Fix Argo CD wait race after server-side apply (retry until deployment exists)
+  * Resume bootstrap: skip Traefik/Argo CD/Dashboard if already healthy
+  * Safe to re-run: himosoft-k3s-server install or bootstrap
+
+ -- Himosoft <admin@himosoft.com.bd>  Fri, 04 Sep 2026 22:30:00 +0600
+
+himosoft-k3s-server (1.1.1) stable; urgency=medium
+
+  * Explicit prompts for Argo CD, Dashboard, and Traefik hostnames
+  * postinst offers to run interactive setup after apt install
+  * Clear access URLs in status, postinst, and install summary
+  * himosoft-k3s-server with no args starts install as root
+
+ -- Himosoft <admin@himosoft.com.bd>  Fri, 04 Sep 2026 18:00:00 +0600
+
 himosoft-k3s-server (1.1.0) stable; urgency=medium
 
   * Full platform bootstrap: K3s, Traefik, Argo CD, Kubernetes Dashboard
