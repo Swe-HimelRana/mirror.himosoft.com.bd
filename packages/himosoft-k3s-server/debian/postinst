@@ -6,7 +6,11 @@ case "$1" in
     mkdir -p /etc/himosoft
     echo ""
     echo "Himosoft K3s Server installed."
-    echo "  sudo himosoft-k3s-server install"
+    echo ""
+    echo "  sudo himosoft-k3s-server install       # K3s + Traefik + Argo CD + dashboards"
+    echo "  sudo himosoft-k3s-server bootstrap     # platform only (K3s already running)"
+    echo "  sudo himosoft-k3s-server status"
+    echo "  sudo himosoft-k3s-server credentials"
     echo ""
     ;;
 esac

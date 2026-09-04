@@ -1,5 +1,14 @@
+himosoft-k3s-server (1.1.0) stable; urgency=medium
+
+  * Full platform bootstrap: K3s, Traefik, Argo CD, Kubernetes Dashboard
+  * Ingress at acd./dash./traefik. subdomains on user-provided base domain
+  * Argo CD CRDs installed with server-side apply (ApplicationSet fix)
+  * New commands: bootstrap, status, credentials
+
+ -- Himosoft <admin@himosoft.com.bd>  Fri, 04 Sep 2026 12:00:00 +0600
+
 himosoft-k3s-server (1.0.0) stable; urgency=medium
 
-  * Initial release: interactive K3s server setup for Linux servers.
+  * Initial release — interactive K3s install with Traefik disabled
 
- -- Himosoft <admin@himosoft.com.bd>  Tue, 01 Sep 2026 14:00:00 +0600
+ -- Himosoft <admin@himosoft.com.bd>  Mon, 01 Sep 2026 12:00:00 +0600

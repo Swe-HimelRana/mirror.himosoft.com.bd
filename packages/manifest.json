@@ -20,14 +20,14 @@
     },
     {
       "name": "himosoft-k3s-server",
-      "title": "Interactive K3s server setup",
-      "description": "Prompts for public IP, domain, and optional K3s version. Installs K3s with Traefik disabled.",
+      "title": "K3s cluster bootstrap",
+      "description": "Installs K3s, Traefik, Argo CD, and Kubernetes Dashboard. Ingress at acd.*, dash.*, traefik.* on your domain.",
       "status": "available",
       "architecture": "all",
       "depends": ["curl", "ca-certificates", "himosoft-common"],
       "installCommand": "sudo apt install himosoft-k3s-server",
       "usageCommand": "sudo himosoft-k3s-server install",
-      "tags": ["k3s", "kubernetes", "server-a"]
+      "tags": ["k3s", "kubernetes", "argocd", "traefik", "server-a"]
     },
     {
       "name": "himosoft-server-deps",

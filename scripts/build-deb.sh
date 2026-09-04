@@ -5,7 +5,7 @@ set -euo pipefail
 PKG_NAME="${1:?Usage: build-deb.sh himosoft-foo}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PKG_DIR="${ROOT}/packages/${PKG_NAME}"
-VERSION="1.0.0"
+VERSION="$(awk '/^Version:/{print $2; exit}' "${PKG_DIR}/debian/control")"
 BUILD_ROOT="${PKG_DIR}/build"
 STAGING="${BUILD_ROOT}/${PKG_NAME}_${VERSION}_all"
 LIB="${ROOT}/packages/_lib/interactive.sh"

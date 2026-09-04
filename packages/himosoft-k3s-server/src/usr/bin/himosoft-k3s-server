@@ -8,12 +8,21 @@ source /usr/share/himosoft/lib/interactive.sh
 
 usage() {
   cat <<'EOF'
-Himosoft K3s Server — interactive K3s setup
+Himosoft K3s Server — interactive K3s + platform bootstrap
 
 Usage:
-  himosoft-k3s-server install
-  himosoft-k3s-server status
+  himosoft-k3s-server install       K3s + Traefik + Argo CD + dashboards
+  himosoft-k3s-server bootstrap      Platform only (K3s must already run)
+  himosoft-k3s-server status          Cluster and URL summary
+  himosoft-k3s-server credentials     Show Argo CD password and dashboard token
   himosoft-k3s-server help
+
+Installs:
+  - K3s server (bundled Traefik disabled)
+  - Traefik ingress (Helm)
+  - Argo CD at acd.<your-domain>
+  - Kubernetes Dashboard at dash.<your-domain>
+  - Traefik dashboard at traefik.<your-domain>
 
 All values are entered at the prompt — nothing is pre-filled automatically.
 Config: /etc/himosoft/k3s-server.conf
@@ -21,7 +30,10 @@ EOF
 }
 
 load_conf() {
-  [[ -f "${CONF}" ]] && source "${CONF}"
+  if [[ -f "${CONF}" ]]; then
+    # shellcheck source=/dev/null
+    source "${CONF}"
+  fi
 }
 
 save_conf() {
@@ -30,48 +42,148 @@ save_conf() {
 # Himosoft K3s Server — $(date -Iseconds)
 PUBLIC_IP="${PUBLIC_IP}"
 DOMAIN="${DOMAIN}"
-K3S_VERSION="${K3S_VERSION}"
+K3S_VERSION="${K3S_VERSION:-}"
+ARGOCD_FQDN="${ARGOCD_FQDN}"
+DASH_FQDN="${DASH_FQDN}"
+TRAEFIK_FQDN="${TRAEFIK_FQDN}"
 EOF
   chmod 600 "${CONF}"
+}
+
+prompt_install_config() {
+  hs_prompt PUBLIC_IP "Enter public IPv4"
+  [[ -n "${PUBLIC_IP}" ]] || { echo "Public IP is required."; exit 1; }
+
+  hs_prompt DOMAIN "Enter base domain (e.g. srv1.himosoft.com.bd)"
+  [[ -n "${DOMAIN}" ]] || { echo "Base domain is required."; exit 1; }
+
+  ARGOCD_FQDN="acd.${DOMAIN}"
+  DASH_FQDN="dash.${DOMAIN}"
+  TRAEFIK_FQDN="traefik.${DOMAIN}"
+
+  hs_prompt_optional K3S_VERSION "K3s version (empty = latest from get.k3s.io)"
+
+  echo ""
+  echo "Summary:"
+  echo "  Public IP         : ${PUBLIC_IP}"
+  echo "  Base domain       : ${DOMAIN}"
+  echo "  Argo CD URL       : https://${ARGOCD_FQDN}"
+  echo "  K8s Dashboard URL : https://${DASH_FQDN}"
+  echo "  Traefik URL       : https://${TRAEFIK_FQDN}/dashboard/"
+  echo "  K3s version       : ${K3S_VERSION:-latest}"
+  echo ""
 }
 
 cmd_install() {
   hs_require_root
   hs_banner "Himosoft K3s Server"
 
-  hs_prompt PUBLIC_IP "Enter public IPv4"
-  [[ -n "${PUBLIC_IP}" ]] || { echo "Public IP is required."; exit 1; }
-
-  hs_prompt DOMAIN "Enter domain for K3s TLS SAN"
-  [[ -n "${DOMAIN}" ]] || { echo "Domain is required."; exit 1; }
-
-  hs_prompt_optional K3S_VERSION "K3s version (empty = latest from get.k3s.io)"
-
-  echo ""
-  echo "Summary:"
-  echo "  Public IP : ${PUBLIC_IP}"
-  echo "  Domain    : ${DOMAIN}"
-  echo "  K3s       : ${K3S_VERSION:-latest}"
-  echo "  Traefik   : disabled"
-  echo ""
-
-  hs_confirm "Proceed with K3s installation?" || { echo "Aborted."; exit 0; }
+  prompt_install_config
+  hs_confirm "Proceed with K3s and platform installation?" || { echo "Aborted."; exit 0; }
 
   save_conf
-  export PUBLIC_IP DOMAIN K3S_VERSION
+  export PUBLIC_IP DOMAIN K3S_VERSION ARGOCD_FQDN DASH_FQDN TRAEFIK_FQDN
   exec "${SHARE}/k3s-install.sh"
+}
+
+cmd_bootstrap() {
+  hs_require_root
+  hs_banner "Platform bootstrap"
+
+  if [[ -f "${CONF}" ]]; then
+    load_conf
+    echo "Using saved config from ${CONF}:"
+    echo "  Domain     : ${DOMAIN}"
+    echo "  Argo CD    : https://${ARGOCD_FQDN}"
+    echo "  Dashboard  : https://${DASH_FQDN}"
+    echo "  Traefik    : https://${TRAEFIK_FQDN}/dashboard/"
+    echo ""
+    hs_confirm "Re-run platform bootstrap with saved settings?" || { echo "Aborted."; exit 0; }
+  else
+    prompt_install_config
+    hs_confirm "Proceed with platform bootstrap?" || { echo "Aborted."; exit 0; }
+    save_conf
+  fi
+
+  if ! command -v k3s >/dev/null 2>&1 || ! systemctl is-active k3s &>/dev/null; then
+    echo "K3s is not running. Run: sudo himosoft-k3s-server install"
+    exit 1
+  fi
+
+  export PUBLIC_IP DOMAIN K3S_VERSION ARGOCD_FQDN DASH_FQDN TRAEFIK_FQDN
+  exec "${SHARE}/platform-bootstrap.sh"
 }
 
 cmd_status() {
   echo "=== Himosoft K3s Server ==="
-  [[ -f "${CONF}" ]] && cat "${CONF}" || echo "(not configured)"
-  command -v k3s >/dev/null && k3s kubectl get nodes 2>/dev/null || echo "K3s: not running"
+  if [[ -f "${CONF}" ]]; then
+    cat "${CONF}"
+    echo ""
+    load_conf
+    echo "URLs:"
+    echo "  Argo CD             https://${ARGOCD_FQDN:-?}"
+    echo "  Kubernetes Dashboard https://${DASH_FQDN:-?}"
+    echo "  Traefik Dashboard   https://${TRAEFIK_FQDN:-?}/dashboard/"
+    echo ""
+  else
+    echo "(not configured — run: sudo himosoft-k3s-server install)"
+    echo ""
+  fi
+
+  if command -v k3s >/dev/null 2>&1 && systemctl is-active k3s &>/dev/null; then
+    echo "K3s node:"
+    k3s kubectl get nodes 2>/dev/null || true
+    echo ""
+    echo "Platform pods:"
+    k3s kubectl get pods -n traefik 2>/dev/null || true
+    k3s kubectl get pods -n argocd 2>/dev/null || true
+    k3s kubectl get pods -n kubernetes-dashboard 2>/dev/null || true
+  else
+    echo "K3s: not running"
+  fi
+}
+
+cmd_credentials() {
+  hs_require_root
+  if ! command -v k3s >/dev/null 2>&1; then
+    echo "K3s not installed."
+    exit 1
+  fi
+
+  load_conf
+  echo "=== Credentials ==="
+  echo ""
+
+  if k3s kubectl get secret argocd-initial-admin-secret -n argocd >/dev/null 2>&1; then
+    echo "Argo CD (https://${ARGOCD_FQDN:-acd.example.com})"
+    echo "  Username: admin"
+    echo -n "  Password: "
+    k3s kubectl get secret argocd-initial-admin-secret -n argocd \
+      -o jsonpath='{.data.password}' | base64 -d
+    echo ""
+    echo ""
+  else
+    echo "Argo CD: not installed or secret missing"
+    echo ""
+  fi
+
+  if k3s kubectl get sa himosoft-dashboard-admin -n kubernetes-dashboard >/dev/null 2>&1; then
+    echo "Kubernetes Dashboard (https://${DASH_FQDN:-dash.example.com})"
+    echo "  Login method: Token"
+    echo "  Token:"
+    k3s kubectl -n kubernetes-dashboard create token himosoft-dashboard-admin --duration=8760h
+    echo ""
+  else
+    echo "Kubernetes Dashboard: not installed or admin SA missing"
+  fi
 }
 
 main() {
   case "${1:-install}" in
     install) cmd_install ;;
+    bootstrap) cmd_bootstrap ;;
     status) cmd_status ;;
+    credentials) cmd_credentials ;;
     help|-h|--help) usage ;;
     *) usage; exit 1 ;;
   esac
@@ -79,7 +191,8 @@ main() {
 
 if [[ $# -eq 0 ]] && [[ "${EUID}" -ne 0 ]]; then
   usage
-  echo ""; echo "Run: sudo himosoft-k3s-server install"
+  echo ""
+  echo "Run: sudo himosoft-k3s-server install"
   exit 0
 fi
 
