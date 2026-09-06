@@ -265,20 +265,25 @@ build_protected_domains_yaml() {
   done
 }
 
+extract_authelia_hash() {
+  grep -oE '\$argon2[^[:space:]]+' | head -1
+}
+
 generate_authelia_password_hash() {
-  local password="$1" hash="" tmp_job="" job_id secret_name
+  local password="$1" hash="" tmp_job="" job_id secret_name logs=""
   job_id="authelia-hash-$$"
   secret_name="${job_id}-pw"
   tmp_job="/tmp/${job_id}.yaml"
 
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    hash="$(docker run --rm docker.io/authelia/authelia:4.38.5 \
-      authelia crypto hash generate argon2 --password "${password}" --no-confirm 2>/dev/null \
-      | awk '/^\$argon2/{print; exit}')"
+    logs="$(docker run --rm docker.io/authelia/authelia:4.38.5 \
+      authelia crypto hash generate argon2 --password "${password}" --no-confirm 2>&1 || true)"
+    hash="$(printf '%s\n' "${logs}" | extract_authelia_hash)"
     if [[ -n "${hash}" ]]; then
       echo "${hash}"
       return 0
     fi
+    [[ -n "${logs}" ]] && warn "Docker hash attempt failed: ${logs}"
   fi
 
   k delete job "${job_id}" -n authelia --ignore-not-found --wait=false 2>/dev/null || true
@@ -300,16 +305,26 @@ spec:
       containers:
         - name: hash
           image: docker.io/authelia/authelia:4.38.5
-          env:
-            - name: AUTHELIA_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: @SECRET_NAME@
-                  key: password
-          command:
-            - /bin/sh
-            - -ec
-            - 'authelia crypto hash generate argon2 --password "$AUTHELIA_PASSWORD" --no-confirm'
+          args:
+            - authelia
+            - crypto
+            - hash
+            - generate
+            - argon2
+            - --password
+            - file:/secrets/password
+            - --no-confirm
+          volumeMounts:
+            - name: password
+              mountPath: /secrets
+              readOnly: true
+      volumes:
+        - name: password
+          secret:
+            secretName: @SECRET_NAME@
+            items:
+              - key: password
+                path: password
 JOBTMPL
   sed -i "s/@JOB_ID@/${job_id}/g; s/@SECRET_NAME@/${secret_name}/g" "${tmp_job}"
 
@@ -319,21 +334,35 @@ JOBTMPL
     return 1
   fi
 
-  k apply -f "${tmp_job}"
+  if ! k apply -f "${tmp_job}"; then
+    warn "Failed to apply Authelia hash job"
+    k delete secret "${secret_name}" -n authelia --ignore-not-found
+    rm -f "${tmp_job}"
+    return 1
+  fi
+
   if ! k wait --for=condition=complete "job/${job_id}" -n authelia --timeout=180s 2>/dev/null; then
-    warn "Authelia hash job failed — pod logs:"
-    k logs "job/${job_id}" -n authelia 2>/dev/null || true
+    warn "Authelia hash job did not complete — details:"
+    k describe job "${job_id}" -n authelia 2>/dev/null | sed -n '/Events:/,$p' || true
+    k logs "job/${job_id}" -n authelia 2>&1 || true
     k delete job "${job_id}" -n authelia --ignore-not-found --wait=false
     k delete secret "${secret_name}" -n authelia --ignore-not-found
     rm -f "${tmp_job}"
     return 1
   fi
 
-  hash="$(k logs "job/${job_id}" -n authelia 2>/dev/null | awk '/^\$argon2/{print; exit}')"
+  logs="$(k logs "job/${job_id}" -n authelia 2>&1 || true)"
+  hash="$(printf '%s\n' "${logs}" | extract_authelia_hash)"
   k delete job "${job_id}" -n authelia --ignore-not-found --wait=false
   k delete secret "${secret_name}" -n authelia --ignore-not-found
   rm -f "${tmp_job}"
-  [[ -n "${hash}" ]] || return 1
+
+  if [[ -z "${hash}" ]]; then
+    warn "Authelia hash job finished but no argon2 digest was found. Job output:"
+    printf '%s\n' "${logs}" >&2
+    return 1
+  fi
+
   echo "${hash}"
 }
 
@@ -345,7 +374,7 @@ sync_authelia_users_secret() {
   local hash tmp_users="/tmp/authelia-users-$$.yml"
   log "Updating Authelia admin user..."
   hash="$(generate_authelia_password_hash "${AUTHELIA_ADMIN_PASSWORD}")" || {
-    echo "Failed to hash Authelia password." >&2
+    echo "Failed to hash Authelia password — see warnings above for job output." >&2
     return 1
   }
 
