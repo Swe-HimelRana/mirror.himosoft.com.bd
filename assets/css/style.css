@@ -321,11 +321,33 @@ section h2 {
   border-radius: var(--radius);
   padding: 1.25rem 1.5rem;
   transition: border-color 0.15s, background 0.15s;
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.card-link:hover {
+  background: var(--bg-card-hover);
+  border-color: #2a3a4d;
+  text-decoration: none;
+  color: inherit;
 }
 
 .card:hover {
   background: var(--bg-card-hover);
   border-color: #2a3a4d;
+}
+
+.card-cta {
+  display: inline-block;
+  margin-top: 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.card-link:hover .card-cta {
+  text-decoration: underline;
 }
 
 .card h3 {
@@ -528,6 +550,192 @@ section h2 {
   color: var(--text);
   display: block;
   margin-bottom: 0.15rem;
+}
+
+/* Package instruction page */
+.package-page {
+  padding: 2rem 0 3rem;
+}
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 1.5rem;
+}
+
+.breadcrumb a {
+  color: var(--muted);
+}
+
+.breadcrumb a:hover {
+  color: var(--accent);
+}
+
+.package-doc {
+  max-width: 760px;
+}
+
+.package-doc.loading {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.package-doc-header {
+  margin-bottom: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.package-doc-header h1 {
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  margin: 0.35rem 0 0.75rem;
+  letter-spacing: -0.02em;
+}
+
+.package-lead {
+  color: var(--muted);
+  font-size: 1.02rem;
+  line-height: 1.65;
+  margin-bottom: 1rem;
+}
+
+.pkg-meta {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin-bottom: 0.75rem;
+}
+
+.doc-section {
+  margin-bottom: 2rem;
+}
+
+.doc-section h2 {
+  font-size: 1.1rem;
+  margin-bottom: 0.85rem;
+  letter-spacing: -0.01em;
+}
+
+.doc-steps {
+  list-style: none;
+  counter-reset: docstep;
+}
+
+.doc-steps li {
+  counter-increment: docstep;
+  position: relative;
+  padding-left: 2.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.doc-steps li::before {
+  content: counter(docstep);
+  position: absolute;
+  left: 0;
+  top: 0.1rem;
+  width: 1.65rem;
+  height: 1.65rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 50%;
+  font-size: 0.78rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.doc-steps li p {
+  color: var(--muted);
+  font-size: 0.92rem;
+  margin: 0.35rem 0 0.65rem;
+}
+
+.doc-list {
+  color: var(--muted);
+  padding-left: 1.25rem;
+}
+
+.doc-list li {
+  margin-bottom: 0.45rem;
+}
+
+.doc-list .muted {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.code-block-wide {
+  max-width: none;
+  margin: 0.65rem 0 0;
+}
+
+.cmd-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.cmd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.cmd-table th,
+.cmd-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.cmd-table th {
+  background: var(--bg-card);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.cmd-table td code {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--green);
+  white-space: nowrap;
+}
+
+.cmd-table tr:last-child td {
+  border-bottom: none;
+}
+
+.btn-secondary {
+  display: inline-block;
+  padding: 0.65rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  background: var(--bg-card);
+}
+
+.btn-secondary:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.doc-error {
+  color: #f87171;
+  margin-bottom: 1rem;
+}
+
+.doc-back {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
 }
 
 footer {

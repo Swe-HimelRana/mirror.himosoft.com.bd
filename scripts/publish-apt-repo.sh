@@ -56,6 +56,28 @@ chmod +x "${ROOT}/scripts/sign-apt-release.sh"
 echo "==> Generating packages.json"
 python3 "${ROOT}/scripts/generate-packages-json.py" "${SITE}"
 
+echo "==> Generating package instruction pages"
+mkdir -p "${SITE}/packages"
+cp "${ROOT}/package.html" "${SITE}/package.html"
+python3 - <<PY
+import json
+import shutil
+from pathlib import Path
+
+root = Path("${ROOT}")
+manifest = json.loads((root / "packages" / "manifest.json").read_text())
+template = root / "package.html"
+site_packages = root / "site" / "packages"
+docs_dir = root / "packages" / "docs"
+
+for entry in manifest.get("packages", []):
+    name = entry["name"]
+    has_docs = (docs_dir / f"{name}.json").is_file() or entry.get("docs")
+    if has_docs:
+        shutil.copy2(template, site_packages / f"{name}.html")
+        print(f"  packages/{name}.html")
+PY
+
 echo ""
 echo "Site ready: ${SITE}/"
 echo "  packages.json"

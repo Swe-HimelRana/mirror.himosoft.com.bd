@@ -1,0 +1,44 @@
+{
+  "overview": "Server C monitoring stack — Prometheus, Grafana, and Traefik with GitHub OAuth. All hostnames, secrets, and OAuth credentials are entered interactively at setup time.",
+  "prerequisites": [
+    "Docker installed (himosoft-docker-host)",
+    "Domain name and DNS for Grafana/Prometheus hostnames",
+    "GitHub OAuth app (Client ID and Secret) if using GitHub login",
+    "Target servers running himosoft-node-exporter"
+  ],
+  "steps": [
+    {
+      "title": "Install Docker host (if needed)",
+      "command": "sudo apt install himosoft-docker-host && sudo himosoft-docker-host install"
+    },
+    {
+      "title": "Install the package",
+      "command": "sudo apt update && sudo apt install himosoft-monitor-host"
+    },
+    {
+      "title": "Initialize monitoring stack",
+      "body": "Prompts for install directory, domain names, GitHub OAuth, and Prometheus scrape targets.",
+      "command": "sudo himosoft-monitor-host init"
+    },
+    {
+      "title": "Start the stack",
+      "command": "sudo himosoft-monitor-host start"
+    },
+    {
+      "title": "Check status",
+      "command": "sudo himosoft-monitor-host status"
+    }
+  ],
+  "commands": [
+    { "command": "sudo himosoft-monitor-host init", "description": "Interactive .env + Prometheus config" },
+    { "command": "sudo himosoft-monitor-host start", "description": "docker compose up -d" },
+    { "command": "sudo himosoft-monitor-host stop", "description": "docker compose down" },
+    { "command": "sudo himosoft-monitor-host status", "description": "Show container status" }
+  ],
+  "notes": [
+    "All values entered at prompt — nothing pre-filled",
+    "Deploy node-exporter on servers you want to scrape",
+    "Point DNS to this server before accessing Grafana"
+  ],
+  "relatedPackages": ["himosoft-docker-host", "himosoft-node-exporter"]
+}

@@ -1,0 +1,58 @@
+{
+  "overview": "Full K3s cluster bootstrap for Server A: installs K3s, Traefik ingress, Kubernetes Dashboard, and optionally Argo CD. Configures HTTPS ingress at acd.*, dash.*, and traefik.* on your domain. Auto-detects public IP, verifies DNS before Let's Encrypt, and skips SSL until DNS is ready.",
+  "prerequisites": [
+    "Fresh Debian/Ubuntu server (root or sudo)",
+    "Domain name (e.g. srv1.example.com) with DNS you control",
+    "Ports 80 and 443 open to the internet for HTTPS",
+    "Port 6443 restricted to your admin IP (use himosoft-firewall)"
+  ],
+  "steps": [
+    {
+      "title": "Add the mirror",
+      "body": "Run once per server if the mirror is not already configured.",
+      "command": "curl -fsSL https://mirror.himosoft.com.bd/install-mirror.sh | sudo bash"
+    },
+    {
+      "title": "Install the package",
+      "body": "Installs the CLI and bootstrap scripts.",
+      "command": "sudo apt update && sudo apt install himosoft-k3s-server"
+    },
+    {
+      "title": "Run interactive setup",
+      "body": "Prompts for public IP (auto-detected default), base domain, hostnames, optional Argo CD, and ACME email. Installs K3s, Traefik, dashboards, and ingress.",
+      "command": "sudo himosoft-k3s-server install"
+    },
+    {
+      "title": "Point DNS",
+      "body": "Create A records for acd.*, dash.*, and traefik.* pointing to your server's public IP.",
+      "command": "# Example:\n# acd.srv1.example.com     -> YOUR_PUBLIC_IP\n# dash.srv1.example.com    -> YOUR_PUBLIC_IP\n# traefik.srv1.example.com -> YOUR_PUBLIC_IP"
+    },
+    {
+      "title": "Enable Let's Encrypt (after DNS)",
+      "body": "Re-checks DNS and switches Traefik to real certificates when all hostnames resolve correctly.",
+      "command": "sudo himosoft-k3s-server fix-ssl"
+    },
+    {
+      "title": "Get login credentials",
+      "body": "Shows Argo CD admin password and Kubernetes Dashboard token.",
+      "command": "sudo himosoft-k3s-server credentials"
+    }
+  ],
+  "commands": [
+    { "command": "sudo himosoft-k3s-server install", "description": "Full interactive setup (K3s + platform)" },
+    { "command": "sudo himosoft-k3s-server bootstrap", "description": "Platform only — K3s must already be running" },
+    { "command": "sudo himosoft-k3s-server fix-ingress", "description": "Fix Argo CD redirect loop behind Traefik" },
+    { "command": "sudo himosoft-k3s-server fix-ssl", "description": "Verify DNS and enable Let's Encrypt" },
+    { "command": "sudo himosoft-k3s-server repair", "description": "Fix Argo CD in wrong namespace and re-bootstrap" },
+    { "command": "sudo himosoft-k3s-server status", "description": "Cluster health, URLs, and pod summary" },
+    { "command": "sudo himosoft-k3s-server credentials", "description": "Argo CD password and dashboard token" }
+  ],
+  "notes": [
+    "Config is saved to /etc/himosoft/k3s-server.conf",
+    "Argo CD install is optional — answer Y/n at the prompt",
+    "If Argo CD shows a blank page or redirect loop, run fix-ingress",
+    "Traefik is pre-installed — skip duplicate Traefik in GitOps Phase 2 or adopt the existing release",
+    "Verify cluster: k3s kubectl get pods -A"
+  ],
+  "relatedPackages": ["himosoft-firewall", "himosoft-server-deps", "himosoft-kubeconfig", "himosoft-server-status"]
+}

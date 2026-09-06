@@ -1,0 +1,25 @@
+{
+  "overview": "Read-only server health report — no configuration required. Checks K3s, Docker, UFW firewall, and node-exporter status in one command. Useful for quick diagnostics or support tickets.",
+  "prerequisites": [
+    "None — works immediately after install"
+  ],
+  "steps": [
+    {
+      "title": "Install the package",
+      "command": "sudo apt update && sudo apt install himosoft-healthcheck"
+    },
+    {
+      "title": "Run healthcheck",
+      "command": "himosoft-healthcheck run"
+    }
+  ],
+  "commands": [
+    { "command": "himosoft-healthcheck run", "description": "Print system, K3s, Docker, firewall, and exporter status" }
+  ],
+  "notes": [
+    "Read-only — does not change any configuration",
+    "Safe to run anytime for a quick status snapshot",
+    "Does not require sudo for the run command"
+  ],
+  "relatedPackages": ["himosoft-k3s-server", "himosoft-server-status"]
+}

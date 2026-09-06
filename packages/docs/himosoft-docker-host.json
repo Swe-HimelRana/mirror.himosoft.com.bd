@@ -1,0 +1,36 @@
+{
+  "overview": "Installs Docker Engine and Docker Compose plugin on Server B or Server C. Prompts for a Linux username to add to the docker group — no automatic user detection.",
+  "prerequisites": [
+    "Debian or Ubuntu server",
+    "An existing Linux user account for Docker access",
+    "Root or sudo access"
+  ],
+  "steps": [
+    {
+      "title": "Install the package",
+      "command": "sudo apt update && sudo apt install himosoft-docker-host"
+    },
+    {
+      "title": "Install Docker Engine",
+      "body": "Prompts for username, shows what will be installed, then applies.",
+      "command": "sudo himosoft-docker-host install"
+    },
+    {
+      "title": "Log out and back in",
+      "body": "The added user must start a new session for docker group membership to take effect."
+    },
+    {
+      "title": "Verify",
+      "command": "sudo himosoft-docker-host status\ndocker ps"
+    }
+  ],
+  "commands": [
+    { "command": "sudo himosoft-docker-host install", "description": "Install Docker and add user to docker group" },
+    { "command": "sudo himosoft-docker-host status", "description": "Check Docker service status" }
+  ],
+  "notes": [
+    "Installs docker.io and docker-compose-plugin from APT",
+    "Required before himosoft-server-b-replica or himosoft-monitor-host"
+  ],
+  "relatedPackages": ["himosoft-server-b-replica", "himosoft-monitor-host"]
+}

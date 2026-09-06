@@ -1,0 +1,39 @@
+{
+  "overview": "Interactive Restic backup agent. Configures repository URL, encryption password, paths to backup, and a cron schedule. Installs restic and registers a scheduled backup script.",
+  "prerequisites": [
+    "Restic repository reachable from this server (local, SFTP, S3, etc.)",
+    "Root or sudo access",
+    "Paths to backup exist on disk"
+  ],
+  "steps": [
+    {
+      "title": "Install the package",
+      "command": "sudo apt update && sudo apt install himosoft-backup-agent"
+    },
+    {
+      "title": "Configure backup",
+      "body": "Prompts for repository URL, password, backup paths, and cron schedule.",
+      "command": "sudo himosoft-backup-agent configure"
+    },
+    {
+      "title": "Run backup manually",
+      "command": "sudo himosoft-backup-agent run"
+    },
+    {
+      "title": "Check status",
+      "command": "sudo himosoft-backup-agent status"
+    }
+  ],
+  "commands": [
+    { "command": "sudo himosoft-backup-agent configure", "description": "Interactive Restic setup + cron" },
+    { "command": "sudo himosoft-backup-agent run", "description": "Run backup now" },
+    { "command": "sudo himosoft-backup-agent status", "description": "Show config and last run info" }
+  ],
+  "notes": [
+    "Config: /etc/himosoft/backup-agent.conf",
+    "Password file: /etc/himosoft/backup-restic-password (mode 600)",
+    "Backup script: /usr/local/bin/himosoft-restic-backup.sh",
+    "Example cron: 0 3 * * * (daily at 03:00)"
+  ],
+  "relatedPackages": []
+}

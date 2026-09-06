@@ -1,0 +1,28 @@
+{
+  "overview": "Installs common operations tools on a Himosoft server — base packages (curl, jq, gnupg) and optionally Helm 3. Every install step asks for confirmation before proceeding.",
+  "prerequisites": [
+    "Debian or Ubuntu with this mirror configured",
+    "Root or sudo access"
+  ],
+  "steps": [
+    {
+      "title": "Install the package",
+      "command": "sudo apt update && sudo apt install himosoft-server-deps"
+    },
+    {
+      "title": "Run interactive install",
+      "body": "Confirms each group of packages before installing.",
+      "command": "sudo himosoft-server-deps install"
+    }
+  ],
+  "commands": [
+    { "command": "sudo himosoft-server-deps install", "description": "Interactive install of ops packages and optional Helm 3" },
+    { "command": "sudo himosoft-server-deps help", "description": "Show usage" }
+  ],
+  "notes": [
+    "Base packages: curl, jq, ca-certificates, gnupg, apt-transport-https",
+    "Helm 3 is optional — you will be prompted",
+    "Recommended on Server A before running himosoft-k3s-server"
+  ],
+  "relatedPackages": ["himosoft-k3s-server"]
+}

@@ -1,0 +1,19 @@
+{
+  "overview": "Shared interactive prompt library used by all himosoft-* packages. You rarely install this directly — APT pulls it in as a dependency.",
+  "prerequisites": [
+    "Debian or Ubuntu server with this mirror configured"
+  ],
+  "steps": [
+    {
+      "title": "Install (automatic)",
+      "body": "Installed automatically when you install any other Himosoft package.",
+      "command": "sudo apt install himosoft-common"
+    }
+  ],
+  "commands": [],
+  "notes": [
+    "Provides /usr/share/himosoft/lib/interactive.sh — banners, confirmations, and secure prompts.",
+    "No configuration or setup command is required."
+  ],
+  "relatedPackages": ["himosoft-k3s-server"]
+}

@@ -1,0 +1,41 @@
+{
+  "overview": "Live terminal dashboard for server monitoring — CPU, memory, swap, disk I/O, network, TLS certificate expiry, and K3s pod alerts. htop-style interface with auto-refresh. Press q to quit.",
+  "prerequisites": [
+    "python3 and python3-rich (installed as dependencies)",
+    "SSH or console access to the server"
+  ],
+  "steps": [
+    {
+      "title": "Install the package",
+      "command": "sudo apt update && sudo apt install himosoft-server-status"
+    },
+    {
+      "title": "Launch dashboard",
+      "body": "Opens a full-screen live dashboard. Press q or Ctrl+C to exit.",
+      "command": "himosoft-server-status"
+    },
+    {
+      "title": "JSON snapshot (for scripts)",
+      "body": "One-shot metrics export — useful for monitoring integrations.",
+      "command": "himosoft-server-status snapshot"
+    },
+    {
+      "title": "Configure refresh interval",
+      "command": "himosoft-server-status configure"
+    }
+  ],
+  "commands": [
+    { "command": "himosoft-server-status", "description": "Start live dashboard (auto-refresh)" },
+    { "command": "himosoft-server-status run", "description": "Same as above" },
+    { "command": "himosoft-server-status snapshot", "description": "JSON metrics for scripts/monitoring" },
+    { "command": "himosoft-server-status configure", "description": "Set refresh interval (interactive)" },
+    { "command": "himosoft-server-status --interval 5", "description": "Override refresh interval for one session" }
+  ],
+  "notes": [
+    "Config: /etc/himosoft/server-status.conf",
+    "Shows K3s pod warnings when cluster is unhealthy",
+    "Checks TLS expiry for configured ingress hostnames",
+    "Does not require sudo to run the dashboard"
+  ],
+  "relatedPackages": ["himosoft-k3s-server", "himosoft-healthcheck"]
+}

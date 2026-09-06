@@ -1,0 +1,43 @@
+{
+  "overview": "Interactive Docker Compose stack for Server B database replicas — MySQL, PostgreSQL, MongoDB, and Redis. All credentials and Server A IP are entered at the prompt; nothing is pre-filled.",
+  "prerequisites": [
+    "Docker installed (himosoft-docker-host)",
+    "Server A primary databases configured for replication",
+    "Matching passwords for each database engine",
+    "Firewall on Server A allows replica IP on DB ports"
+  ],
+  "steps": [
+    {
+      "title": "Install Docker host (if needed)",
+      "command": "sudo apt install himosoft-docker-host && sudo himosoft-docker-host install"
+    },
+    {
+      "title": "Install the package",
+      "command": "sudo apt update && sudo apt install himosoft-server-b-replica"
+    },
+    {
+      "title": "Initialize replica stack",
+      "body": "Prompts for Server A IP and database passwords. Writes .env and compose files to /opt/himosoft/server-b-replica.",
+      "command": "sudo himosoft-server-b-replica init"
+    },
+    {
+      "title": "Start containers",
+      "command": "sudo himosoft-server-b-replica start"
+    },
+    {
+      "title": "Check status",
+      "command": "sudo himosoft-server-b-replica status"
+    }
+  ],
+  "commands": [
+    { "command": "sudo himosoft-server-b-replica init", "description": "Interactive .env + compose setup" },
+    { "command": "sudo himosoft-server-b-replica start", "description": "docker compose up -d" },
+    { "command": "sudo himosoft-server-b-replica status", "description": "Show container status" }
+  ],
+  "notes": [
+    "Passwords must match the primary on Server A",
+    "Configure himosoft-firewall on Server A with this server's IP as replica IP",
+    "Install directory: /opt/himosoft/server-b-replica"
+  ],
+  "relatedPackages": ["himosoft-docker-host", "himosoft-firewall"]
+}

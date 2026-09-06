@@ -1,0 +1,33 @@
+{
+  "overview": "Installs and configures prometheus-node-exporter for Prometheus scraping. Prompts for listen address and port — useful on any server you want to monitor.",
+  "prerequisites": [
+    "Debian or Ubuntu server",
+    "Prometheus or monitor-host configured to scrape this target",
+    "Firewall allows scrape port from monitoring server"
+  ],
+  "steps": [
+    {
+      "title": "Install the package",
+      "command": "sudo apt update && sudo apt install himosoft-node-exporter"
+    },
+    {
+      "title": "Configure and start",
+      "body": "Prompts for listen address (e.g. 0.0.0.0 or private IP) and port.",
+      "command": "sudo himosoft-node-exporter install"
+    },
+    {
+      "title": "Verify",
+      "command": "sudo himosoft-node-exporter status\ncurl -s localhost:9100/metrics | head"
+    }
+  ],
+  "commands": [
+    { "command": "sudo himosoft-node-exporter install", "description": "Install and configure node exporter" },
+    { "command": "sudo himosoft-node-exporter status", "description": "Show service status" }
+  ],
+  "notes": [
+    "Config saved to /etc/himosoft/node-exporter.conf",
+    "Default Prometheus scrape path: /metrics",
+    "Install on Server A, B, and C for full fleet monitoring"
+  ],
+  "relatedPackages": ["himosoft-monitor-host"]
+}

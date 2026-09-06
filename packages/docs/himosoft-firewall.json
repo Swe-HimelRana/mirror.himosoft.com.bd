@@ -1,0 +1,35 @@
+{
+  "overview": "Interactive UFW firewall setup for Himosoft Server A. Opens HTTP/HTTPS to the world, restricts SSH and K3s API (6443) to your admin IP, and optionally allows database ports from a replica/monitoring server.",
+  "prerequisites": [
+    "UFW available (installed automatically if missing)",
+    "Your admin public IP address",
+    "Root or sudo access"
+  ],
+  "steps": [
+    {
+      "title": "Install the package",
+      "command": "sudo apt update && sudo apt install himosoft-firewall"
+    },
+    {
+      "title": "Configure firewall",
+      "body": "Prompts for admin IP and optional replica IP. Shows proposed rules before applying.",
+      "command": "sudo himosoft-firewall configure"
+    },
+    {
+      "title": "Verify rules",
+      "command": "sudo himosoft-firewall status"
+    }
+  ],
+  "commands": [
+    { "command": "sudo himosoft-firewall configure", "description": "Interactive UFW setup" },
+    { "command": "sudo himosoft-firewall status", "description": "Show current UFW status" },
+    { "command": "sudo himosoft-firewall help", "description": "Show usage" }
+  ],
+  "notes": [
+    "Config saved to /etc/himosoft/firewall.conf",
+    "Default rules: allow 80/tcp, 443/tcp; allow 22 and 6443 from admin IP only",
+    "Optional replica IP opens 3306, 5432, 27017, 6379 from that source",
+    "Run before or after K3s install — recommended before exposing the server"
+  ],
+  "relatedPackages": ["himosoft-k3s-server", "himosoft-server-b-replica"]
+}

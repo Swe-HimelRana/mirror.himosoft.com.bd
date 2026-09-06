@@ -66,6 +66,8 @@
 
   function renderPackageCard(pkg) {
     const status = pkg.status || 'planned';
+    const hasDocs = !!(pkg.docsUrl || pkg.docs);
+    const docsHref = pkg.docsUrl || `packages/${encodeURIComponent(pkg.name)}.html`;
     const tags = (pkg.tags || [])
       .map(function (t) {
         const cls = t === 'stable' || t === 'planned' ? 'status-' + t : '';
@@ -88,6 +90,22 @@
       pkg.installCommand && status === 'available'
         ? `<div class="tag-item" style="margin-top:0.5rem;font-family:var(--mono)">${esc(pkg.installCommand)}</div>`
         : '';
+
+    const cta = hasDocs ? '<span class="card-cta">View instructions →</span>' : '';
+
+    if (hasDocs) {
+      return `
+      <a class="card card-link status-${esc(status)}" href="${esc(docsHref)}">
+        <div class="pkg-name">${esc(pkg.name)}</div>
+        <h3>${esc(pkg.title)}</h3>
+        ${extra}
+        <p>${esc(pkg.description)}</p>
+        ${install}
+        <div class="tags">${tags}</div>
+        ${cta}
+      </a>
+    `;
+    }
 
     return `
       <article class="card status-${esc(status)}">

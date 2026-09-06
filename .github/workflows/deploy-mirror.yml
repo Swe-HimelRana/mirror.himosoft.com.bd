@@ -8,6 +8,8 @@ on:
       - 'scripts/**'
       - 'assets/**'
       - 'index.html'
+      - 'package.html'
+      - 'packages/docs/**'
       - 'install-mirror.sh'
       - 'CNAME'
       - '.github/workflows/deploy-mirror.yml'

@@ -49,6 +49,13 @@ def main() -> int:
     manifest = json.loads(manifest_path.read_text())
     mirror_url = manifest.get("mirrorUrl", "https://mirror.himosoft.com.bd").rstrip("/")
     generated_at = datetime.now(timezone.utc).isoformat()
+    docs_root = packages_root / "docs"
+
+    def load_docs(package_name: str) -> dict | None:
+        docs_path = docs_root / f"{package_name}.json"
+        if docs_path.is_file():
+            return json.loads(docs_path.read_text())
+        return None
 
     # Index built .deb files by package name
     deb_index: dict[str, Path] = {}
@@ -73,6 +80,11 @@ def main() -> int:
             "tags": entry.get("tags", []),
             "deb": None,
         }
+
+        docs = entry.get("docs") or load_docs(name)
+        if docs:
+            pkg_out["docs"] = docs
+            pkg_out["docsUrl"] = f"packages/{name}.html"
 
         deb_path = deb_index.get(name)
         if deb_path and entry.get("status") == "available":

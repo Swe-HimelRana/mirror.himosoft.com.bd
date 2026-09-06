@@ -1,0 +1,31 @@
+{
+  "overview": "Applies kernel sysctl tuning recommended for K3s hosts — inotify limits, ip_forward, somaxconn, and vm.max_map_count. Shows all values and asks for confirmation before writing /etc/sysctl.d/99-himosoft.conf.",
+  "prerequisites": [
+    "Root or sudo access",
+    "Recommended on Server A before K3s install"
+  ],
+  "steps": [
+    {
+      "title": "Install the package",
+      "command": "sudo apt update && sudo apt install himosoft-system-tune"
+    },
+    {
+      "title": "Review and apply",
+      "body": "Displays proposed sysctl values. Nothing is changed until you confirm.",
+      "command": "sudo himosoft-system-tune apply"
+    },
+    {
+      "title": "Check applied settings",
+      "command": "sudo himosoft-system-tune status"
+    }
+  ],
+  "commands": [
+    { "command": "sudo himosoft-system-tune apply", "description": "Show settings and apply after confirm" },
+    { "command": "sudo himosoft-system-tune status", "description": "Show current sysctl values" }
+  ],
+  "notes": [
+    "Settings persist across reboots via /etc/sysctl.d/99-himosoft.conf",
+    "Safe to re-run — overwrites the same file"
+  ],
+  "relatedPackages": ["himosoft-k3s-server"]
+}
