@@ -40,41 +40,87 @@ wait_for_k3s() {
   return 1
 }
 
-# Poll until a workload exists, then wait for rollout (handles SSA apply race).
+diagnose_workload() {
+  local ns="$1" name="$2"
+  warn "Diagnostics for ${name} in namespace ${ns}:"
+  k get pods -n "${ns}" 2>/dev/null | grep -E "NAME|${name}" || k get pods -n "${ns}" 2>/dev/null || true
+  local pod
+  pod="$(k get pods -n "${ns}" -o name 2>/dev/null | grep "${name}" | head -1 || true)"
+  if [[ -n "${pod}" ]]; then
+    k describe "${pod}" -n "${ns}" 2>/dev/null | sed -n '/Events:/,$p' | tail -20
+    k logs "${pod}" -n "${ns}" --tail=25 2>/dev/null || true
+  fi
+}
+
+workload_has_fatal_pod() {
+  local ns="$1" name="$2"
+  k get pods -n "${ns}" --no-headers 2>/dev/null | grep "${name}" \
+    | grep -qE 'CrashLoopBackOff|ImagePullBackOff|ErrImagePull|CreateContainerConfigError'
+}
+
+# Poll until ready; uses wall clock (rollout --timeout does not count toward max_wait incorrectly).
 wait_for_deployment() {
   local ns="$1" name="$2" max_wait="${3:-600}"
-  local elapsed=0
-  log "Waiting for deployment/${name} in ${ns}..."
-  while (( elapsed < max_wait )); do
+  local start now elapsed last_diag=0 remaining
+  start="$(date +%s)"
+  log "Waiting for deployment/${name} in ${ns} (up to ${max_wait}s, images may take several minutes)..."
+  while true; do
+    now="$(date +%s)"
+    elapsed=$((now - start))
+    if (( elapsed >= max_wait )); then
+      warn "Timed out after ${max_wait}s waiting for deployment/${name} in ${ns}"
+      diagnose_workload "${ns}" "${name}"
+      return 1
+    fi
     if k get deployment "${name}" -n "${ns}" >/dev/null 2>&1; then
-      if k rollout status "deployment/${name}" -n "${ns}" --timeout=120s; then
+      if workload_has_fatal_pod "${ns}" "${name}"; then
+        warn "Pod for ${name} is in a failed state"
+        diagnose_workload "${ns}" "${name}"
+      fi
+      remaining=$((max_wait - elapsed))
+      (( remaining < 30 )) && remaining=30
+      if k rollout status "deployment/${name}" -n "${ns}" --timeout="${remaining}s" 2>/dev/null; then
+        log "deployment/${name} is ready"
         return 0
       fi
+      if (( elapsed - last_diag >= 90 )); then
+        log "Still waiting for ${name}... (${elapsed}s elapsed)"
+        k get pods -n "${ns}" 2>/dev/null | grep -E "NAME|${name}" || true
+        last_diag=$elapsed
+      fi
     fi
-    sleep 5
-    elapsed=$((elapsed + 5))
+    sleep 10
   done
-  warn "deployment/${name} not ready in namespace ${ns}"
-  k get deploy,pods -n "${ns}" 2>/dev/null || true
-  return 1
 }
 
 wait_for_statefulset() {
   local ns="$1" name="$2" max_wait="${3:-600}"
-  local elapsed=0
-  log "Waiting for statefulset/${name} in ${ns}..."
-  while (( elapsed < max_wait )); do
+  local start now elapsed last_diag=0 remaining
+  start="$(date +%s)"
+  log "Waiting for statefulset/${name} in ${ns} (up to ${max_wait}s)..."
+  while true; do
+    now="$(date +%s)"
+    elapsed=$((now - start))
+    if (( elapsed >= max_wait )); then
+      warn "Timed out after ${max_wait}s waiting for statefulset/${name} in ${ns}"
+      diagnose_workload "${ns}" "${name}"
+      return 1
+    fi
     if k get statefulset "${name}" -n "${ns}" >/dev/null 2>&1; then
-      if k rollout status "statefulset/${name}" -n "${ns}" --timeout=120s; then
+      remaining=$((max_wait - elapsed))
+      (( remaining < 30 )) && remaining=30
+      if k rollout status "statefulset/${name}" -n "${ns}" --timeout="${remaining}s" 2>/dev/null; then
+        log "statefulset/${name} is ready"
         return 0
       fi
+      if (( elapsed - last_diag >= 90 )); then
+        log "Still waiting for ${name}... (${elapsed}s elapsed)"
+        k get pods -n "${ns}" 2>/dev/null | grep -E "NAME|${name}" || true
+        last_diag=$elapsed
+      fi
     fi
-    sleep 5
-    elapsed=$((elapsed + 5))
+    sleep 10
   done
-  warn "statefulset/${name} not ready in namespace ${ns}"
-  k get sts,pods -n "${ns}" 2>/dev/null || true
-  return 1
 }
 
 deployment_ready() {

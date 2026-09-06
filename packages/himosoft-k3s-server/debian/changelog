@@ -1,3 +1,11 @@
+himosoft-k3s-server (1.2.3) stable; urgency=medium
+
+  * Fix Argo CD wait loop that could hang for hours (wall-clock timeout)
+  * Wait for redis/dex/repo-server before argocd-server; show progress every 90s
+  * Print pod diagnostics on timeout or CrashLoopBackOff
+
+ -- Himosoft <admin@himosoft.com.bd>  Sun, 07 Sep 2026 15:30:00 +0600
+
 himosoft-k3s-server (1.2.2) stable; urgency=medium
 
   * Fix sed crash when enabling Let's Encrypt (multiline Traefik TLS block)

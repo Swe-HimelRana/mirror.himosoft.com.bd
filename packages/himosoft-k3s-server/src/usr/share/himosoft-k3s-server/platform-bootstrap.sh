@@ -82,8 +82,13 @@ install_argocd() {
   k apply --server-side --force-conflicts -n argocd -f "${ARGOCD_MANIFEST}"
   sleep 5
 
-  wait_for_deployment argocd argocd-server 600
-  wait_for_deployment argocd argocd-repo-server 600
+  log "Waiting for Argo CD dependencies (redis, dex, repo-server)..."
+  wait_for_deployment argocd argocd-redis 600
+  wait_for_deployment argocd argocd-dex-server 600
+  wait_for_deployment argocd argocd-repo-server 900
+
+  log "Waiting for Argo CD server..."
+  wait_for_deployment argocd argocd-server 900
   wait_for_statefulset argocd argocd-application-controller 600 || true
   wait_for_deployment argocd argocd-applicationset-controller 300 || true
 
