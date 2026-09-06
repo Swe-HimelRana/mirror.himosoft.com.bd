@@ -131,6 +131,78 @@ deployment_ready() {
   [[ -n "${ready}" && -n "${desired}" && "${ready}" -ge 1 && "${ready}" == "${desired}" ]]
 }
 
+k3s_running() {
+  command -v k3s >/dev/null 2>&1 && systemctl is-active k3s &>/dev/null
+}
+
+k8s_namespace_exists() {
+  k get namespace "$1" >/dev/null 2>&1
+}
+
+# Sets STATE_K3S STATE_TRAEFIK STATE_AUTHELIA STATE_ARGOCD STATE_DASHBOARD
+# Values: missing | installed | ready
+detect_platform_state() {
+  STATE_K3S=missing
+  STATE_TRAEFIK=missing
+  STATE_AUTHELIA=missing
+  STATE_ARGOCD=missing
+  STATE_DASHBOARD=missing
+
+  if command -v k3s >/dev/null 2>&1; then
+    if k3s_running; then
+      STATE_K3S=ready
+    else
+      STATE_K3S=installed
+    fi
+  fi
+
+  if ! k3s_running; then
+    return 0
+  fi
+
+  if k8s_namespace_exists traefik; then
+    if deployment_ready traefik traefik; then
+      STATE_TRAEFIK=ready
+    else
+      STATE_TRAEFIK=installed
+    fi
+  fi
+
+  if k8s_namespace_exists authelia && k get deployment authelia -n authelia >/dev/null 2>&1; then
+    if deployment_ready authelia authelia; then
+      STATE_AUTHELIA=ready
+    else
+      STATE_AUTHELIA=installed
+    fi
+  fi
+
+  if k8s_namespace_exists argocd; then
+    if deployment_ready argocd argocd-server; then
+      STATE_ARGOCD=ready
+    else
+      STATE_ARGOCD=installed
+    fi
+  fi
+
+  if k8s_namespace_exists kubernetes-dashboard; then
+    if deployment_ready kubernetes-dashboard kubernetes-dashboard; then
+      STATE_DASHBOARD=ready
+    else
+      STATE_DASHBOARD=installed
+    fi
+  fi
+}
+
+platform_state_label() {
+  case "${1:-missing}" in
+    ready) echo "installed (ready)" ;;
+    installed) echo "installed (starting or unhealthy)" ;;
+    missing) echo "not installed" ;;
+    disabled) echo "disabled in config" ;;
+    *) echo "${1}" ;;
+  esac
+}
+
 wait_pods_ready() {
   local ns="$1" label="$2"
   k wait --for=condition=ready pod -l "${label}" -n "${ns}" --timeout=600s
@@ -433,6 +505,11 @@ upgrade_traefik_dashboard_auth() {
 }
 
 install_authelia() {
+  if [[ "${SKIP_AUTHELIA:-no}" == "yes" ]]; then
+    log "Authelia already installed — skipping"
+    return 0
+  fi
+
   if ! authelia_enabled; then
     log "Skipping Authelia (not selected)"
     return 0

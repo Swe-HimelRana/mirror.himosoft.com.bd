@@ -255,10 +255,266 @@ prompt_install_config() {
   echo ""
 }
 
+hs_confirm_yes() {
+  local question="$1"
+  local reply
+  read -r -p "${question} [Y/n]: " reply
+  [[ -z "${reply}" || "${reply}" =~ ^[Yy]$ ]]
+}
+
+save_config_baselines() {
+  BASE_PUBLIC_IP="${PUBLIC_IP:-}"
+  BASE_DOMAIN="${DOMAIN:-}"
+  BASE_K3S_VERSION="${K3S_VERSION:-}"
+  BASE_ARGOCD_FQDN="${ARGOCD_FQDN:-}"
+  BASE_DASH_FQDN="${DASH_FQDN:-}"
+  BASE_TRAEFIK_FQDN="${TRAEFIK_FQDN:-}"
+  BASE_AUTH_FQDN="${AUTH_FQDN:-}"
+  BASE_INSTALL_ARGOCD="${INSTALL_ARGOCD:-yes}"
+  BASE_INSTALL_AUTHELIA="${INSTALL_AUTHELIA:-yes}"
+  BASE_ACME_EMAIL="${ACME_EMAIL:-}"
+  BASE_AUTHELIA_ADMIN_USER="${AUTHELIA_ADMIN_USER:-}"
+  BASE_AUTHELIA_ADMIN_EMAIL="${AUTHELIA_ADMIN_EMAIL:-}"
+}
+
+detect_config_changes() {
+  CONFIG_K3S_CHANGED=no
+  CONFIG_TRAEFIK_CHANGED=no
+  CONFIG_AUTHELIA_CHANGED=no
+  CONFIG_ARGOCD_CHANGED=no
+  CONFIG_DASHBOARD_CHANGED=no
+  CONFIG_INGRESS_CHANGED=no
+
+  if [[ "${BASE_PUBLIC_IP}" != "${PUBLIC_IP}" || "${BASE_DOMAIN}" != "${DOMAIN}" \
+     || "${BASE_K3S_VERSION}" != "${K3S_VERSION:-}" ]]; then
+    CONFIG_K3S_CHANGED=yes
+  fi
+  if [[ "${BASE_TRAEFIK_FQDN}" != "${TRAEFIK_FQDN}" || "${BASE_ACME_EMAIL}" != "${ACME_EMAIL}" ]]; then
+    CONFIG_TRAEFIK_CHANGED=yes
+  fi
+  if [[ "${BASE_AUTH_FQDN}" != "${AUTH_FQDN:-}" || "${BASE_INSTALL_AUTHELIA}" != "${INSTALL_AUTHELIA}" \
+     || "${BASE_AUTHELIA_ADMIN_USER}" != "${AUTHELIA_ADMIN_USER:-}" \
+     || "${BASE_AUTHELIA_ADMIN_EMAIL}" != "${AUTHELIA_ADMIN_EMAIL:-}" ]]; then
+    CONFIG_AUTHELIA_CHANGED=yes
+  fi
+  if [[ "${BASE_ARGOCD_FQDN}" != "${ARGOCD_FQDN:-}" || "${BASE_INSTALL_ARGOCD}" != "${INSTALL_ARGOCD}" ]]; then
+    CONFIG_ARGOCD_CHANGED=yes
+  fi
+  if [[ "${BASE_DASH_FQDN}" != "${DASH_FQDN}" ]]; then
+    CONFIG_DASHBOARD_CHANGED=yes
+  fi
+  if [[ "${CONFIG_TRAEFIK_CHANGED}" == yes || "${CONFIG_AUTHELIA_CHANGED}" == yes \
+     || "${CONFIG_ARGOCD_CHANGED}" == yes || "${CONFIG_DASHBOARD_CHANGED}" == yes ]]; then
+    CONFIG_INGRESS_CHANGED=yes
+  fi
+}
+
+installation_detected() {
+  [[ -f "${CONF}" ]] && return 0
+  # shellcheck source=/dev/null
+  source "${SHARE}/lib.sh" 2>/dev/null || true
+  k3s_running 2>/dev/null
+}
+
+print_platform_status() {
+  local traefik_state="${STATE_TRAEFIK}" authelia_state="${STATE_AUTHELIA}"
+  local argocd_state="${STATE_ARGOCD}" dashboard_state="${STATE_DASHBOARD}"
+
+  [[ "${INSTALL_AUTHELIA:-yes}" != "yes" ]] && authelia_state=disabled
+  [[ "${INSTALL_ARGOCD:-yes}" != "yes" ]] && argocd_state=disabled
+
+  echo "  K3s                  : $(platform_state_label "${STATE_K3S}")"
+  echo "  Traefik              : $(platform_state_label "${traefik_state}")"
+  echo "  Authelia             : $(platform_state_label "${authelia_state}")"
+  echo "  Argo CD              : $(platform_state_label "${argocd_state}")"
+  echo "  Kubernetes Dashboard : $(platform_state_label "${dashboard_state}")"
+  [[ -f "${CONF}" ]] && echo "  Saved config         : ${CONF}"
+}
+
+plan_action_label() {
+  local state="$1" skip="$2" reconfigure="${3:-no}"
+  if [[ "${skip}" == "yes" ]]; then
+    if [[ "${reconfigure}" == "yes" ]]; then
+      echo "reconfigure ingress only"
+    else
+      echo "skip"
+    fi
+  elif [[ "${state}" == "ready" ]]; then
+    echo "reconfigure"
+  elif [[ "${state}" == "installed" ]]; then
+    echo "continue / repair"
+  else
+    echo "install"
+  fi
+}
+
+print_install_plan() {
+  local authelia_state="${STATE_AUTHELIA}" argocd_state="${STATE_ARGOCD}"
+  [[ "${INSTALL_AUTHELIA:-yes}" != "yes" ]] && authelia_state=disabled
+  [[ "${INSTALL_ARGOCD:-yes}" != "yes" ]] && argocd_state=disabled
+
+  echo ""
+  echo "Installation plan"
+  echo "─────────────────"
+  printf "  %-22s : %s\n" "K3s" "$(plan_action_label "${STATE_K3S}" "${SKIP_K3S}")"
+  printf "  %-22s : %s\n" "Traefik" "$(plan_action_label "${STATE_TRAEFIK}" "${SKIP_TRAEFIK}")"
+  printf "  %-22s : %s\n" "Authelia" "$(plan_action_label "${authelia_state}" "${SKIP_AUTHELIA}")"
+  printf "  %-22s : %s\n" "Argo CD" "$(plan_action_label "${argocd_state}" "${SKIP_ARGOCD}" "${RECONFIGURE_ARGOCD:-no}")"
+  printf "  %-22s : %s\n" "Dashboard" "$(plan_action_label "${STATE_DASHBOARD}" "${SKIP_DASHBOARD}" "${RECONFIGURE_DASHBOARD:-no}")"
+  if [[ "${SKIP_INGRESS:-no}" == "yes" ]]; then
+    printf "  %-22s : %s\n" "Ingress routes" "skip"
+  else
+    printf "  %-22s : %s\n" "Ingress routes" "apply"
+  fi
+  echo ""
+}
+
+plan_install_actions() {
+  SKIP_K3S=no
+  SKIP_TRAEFIK=no
+  SKIP_AUTHELIA=no
+  SKIP_ARGOCD=no
+  SKIP_DASHBOARD=no
+  SKIP_INGRESS=no
+  RECONFIGURE_ARGOCD=no
+  RECONFIGURE_DASHBOARD=no
+  RECONFIGURE_AUTHELIA=no
+
+  if [[ "${STATE_K3S}" == "ready" ]]; then
+    SKIP_K3S=yes
+    if [[ "${CONFIG_K3S_CHANGED:-no}" == "yes" ]]; then
+      echo ""
+      echo "Note: K3s is already running. IP/domain changes in config were saved but"
+      echo "      K3s TLS settings are not changed automatically (avoids cluster restart)."
+    fi
+  fi
+
+  if [[ "${STATE_TRAEFIK}" == "ready" ]]; then
+    if [[ "${CONFIG_TRAEFIK_CHANGED:-no}" == "yes" ]]; then
+      echo ""
+      echo "Traefik is installed but hostname or Let's Encrypt email changed."
+      if hs_confirm "Reconfigure Traefik (Helm upgrade)?"; then
+        SKIP_TRAEFIK=no
+      else
+        SKIP_TRAEFIK=yes
+      fi
+    else
+      SKIP_TRAEFIK=yes
+    fi
+  fi
+
+  if [[ "${INSTALL_AUTHELIA:-yes}" != "yes" || -z "${AUTH_FQDN:-}" ]]; then
+    SKIP_AUTHELIA=yes
+  elif [[ "${STATE_AUTHELIA}" == "ready" ]]; then
+    if [[ "${CONFIG_AUTHELIA_CHANGED:-no}" == "yes" ]]; then
+      echo ""
+      echo "Authelia is installed but portal hostname or enable/disable setting changed."
+      if hs_confirm "Reconfigure Authelia?"; then
+        SKIP_AUTHELIA=no
+        RECONFIGURE_AUTHELIA=yes
+      else
+        SKIP_AUTHELIA=yes
+      fi
+    else
+      SKIP_AUTHELIA=yes
+    fi
+  fi
+
+  if [[ "${INSTALL_ARGOCD:-yes}" != "yes" || -z "${ARGOCD_FQDN:-}" ]]; then
+    SKIP_ARGOCD=yes
+  elif [[ "${STATE_ARGOCD}" == "ready" ]]; then
+    if [[ "${CONFIG_ARGOCD_CHANGED:-no}" == "yes" ]]; then
+      echo ""
+      echo "Argo CD is installed but hostname changed."
+      if hs_confirm "Reconfigure Argo CD ingress?"; then
+        SKIP_ARGOCD=yes
+        RECONFIGURE_ARGOCD=yes
+      else
+        SKIP_ARGOCD=yes
+      fi
+    else
+      SKIP_ARGOCD=yes
+    fi
+  fi
+
+  if [[ "${STATE_DASHBOARD}" == "ready" ]]; then
+    if [[ "${CONFIG_DASHBOARD_CHANGED:-no}" == "yes" ]]; then
+      echo ""
+      echo "Kubernetes Dashboard is installed but hostname changed."
+      if hs_confirm "Reconfigure Dashboard ingress?"; then
+        SKIP_DASHBOARD=yes
+        RECONFIGURE_DASHBOARD=yes
+      else
+        SKIP_DASHBOARD=yes
+      fi
+    else
+      SKIP_DASHBOARD=yes
+    fi
+  fi
+
+  if [[ "${CONFIG_INGRESS_CHANGED:-no}" == yes || "${RECONFIGURE_ARGOCD:-no}" == yes \
+     || "${RECONFIGURE_DASHBOARD:-no}" == yes || "${RECONFIGURE_AUTHELIA:-no}" == yes ]]; then
+    SKIP_INGRESS=no
+  elif [[ "${SKIP_TRAEFIK}" == yes && "${SKIP_AUTHELIA}" == yes && "${SKIP_ARGOCD}" == yes \
+       && "${SKIP_DASHBOARD}" == yes ]]; then
+    SKIP_INGRESS=yes
+  fi
+
+  export SKIP_K3S SKIP_TRAEFIK SKIP_AUTHELIA SKIP_ARGOCD SKIP_DASHBOARD SKIP_INGRESS
+  export RECONFIGURE_ARGOCD RECONFIGURE_DASHBOARD RECONFIGURE_AUTHELIA
+}
+
+prepare_smart_install() {
+  # shellcheck source=/dev/null
+  source "${SHARE}/lib.sh"
+  detect_platform_state
+
+  echo ""
+  echo "Existing installation detected"
+  echo "──────────────────────────────"
+  print_platform_status
+
+  if [[ -f "${CONF}" ]]; then
+    if hs_confirm_yes "Use saved configuration from ${CONF}?"; then
+      prompt_authelia_if_needed
+    else
+      prompt_install_config
+    fi
+  else
+    prompt_install_config
+  fi
+
+  detect_config_changes
+  plan_install_actions
+  print_install_plan
+
+  hs_confirm_yes "Proceed with this plan?" || { echo "Aborted."; exit 0; }
+  save_conf
+}
+
+prepare_fresh_install() {
+  prompt_install_config
+  CONFIG_K3S_CHANGED=no
+  CONFIG_TRAEFIK_CHANGED=no
+  CONFIG_AUTHELIA_CHANGED=no
+  CONFIG_ARGOCD_CHANGED=no
+  CONFIG_DASHBOARD_CHANGED=no
+  CONFIG_INGRESS_CHANGED=no
+  # shellcheck source=/dev/null
+  source "${SHARE}/lib.sh"
+  detect_platform_state
+  plan_install_actions
+  print_install_plan
+  hs_confirm_yes "Proceed with installation?" || { echo "Aborted."; exit 0; }
+  save_conf
+}
+
 export_install_vars() {
   export PUBLIC_IP DOMAIN K3S_VERSION ARGOCD_FQDN DASH_FQDN TRAEFIK_FQDN
   export INSTALL_ARGOCD INSTALL_AUTHELIA AUTH_FQDN ACME_EMAIL SHARE
   export AUTHELIA_ADMIN_USER AUTHELIA_ADMIN_EMAIL AUTHELIA_ADMIN_PASSWORD
+  export SKIP_K3S SKIP_TRAEFIK SKIP_AUTHELIA SKIP_ARGOCD SKIP_DASHBOARD SKIP_INGRESS
+  export RECONFIGURE_ARGOCD RECONFIGURE_DASHBOARD RECONFIGURE_AUTHELIA
   if [[ -z "${AUTHELIA_ADMIN_PASSWORD:-}" && -f /etc/himosoft/authelia-admin.env ]]; then
     # shellcheck source=/dev/null
     source /etc/himosoft/authelia-admin.env
@@ -270,9 +526,15 @@ cmd_install() {
   hs_require_root
   require_share_files
   hs_banner "Himosoft K3s Server — interactive setup"
-  prompt_install_config
-  hs_confirm "Proceed with installation?" || { echo "Aborted."; exit 0; }
-  save_conf
+
+  if installation_detected; then
+    load_conf 2>/dev/null || true
+    save_config_baselines
+    prepare_smart_install
+  else
+    prepare_fresh_install
+  fi
+
   export_install_vars
   exec "${SHARE}/k3s-install.sh"
 }
@@ -281,20 +543,21 @@ cmd_bootstrap() {
   hs_require_root
   require_share_files
   hs_banner "Platform bootstrap"
-  if [[ -f "${CONF}" ]]; then
-    load_conf
-    echo "Using saved config from ${CONF}"
-    prompt_authelia_if_needed
-    hs_confirm "Re-run platform bootstrap?" || exit 0
-  else
-    prompt_install_config
-    hs_confirm "Proceed?" || exit 0
-    save_conf
-  fi
+
   if ! command -v k3s >/dev/null 2>&1 || ! systemctl is-active k3s &>/dev/null; then
     echo "K3s is not running. Run: sudo himosoft-k3s-server install"
     exit 1
   fi
+
+  load_conf 2>/dev/null || true
+  save_config_baselines
+
+  if [[ -f "${CONF}" ]]; then
+    prepare_smart_install
+  else
+    prepare_fresh_install
+  fi
+
   export_install_vars
   exec "${SHARE}/platform-bootstrap.sh"
 }

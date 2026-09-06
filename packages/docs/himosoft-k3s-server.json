@@ -46,6 +46,8 @@
   ],
   "notes": [
     "Login is password-only (one_factor) — no TOTP or mail server required",
+    "Re-running install or bootstrap skips components that are already installed",
+    "Reconfigure prompts appear only when hostnames or settings change",
     "Authelia account email is metadata only; notifications use filesystem, not SMTP",
     "Read Authelia codes: sudo k3s kubectl exec -n authelia deploy/authelia -- cat /data/notification.txt",
     "Login portal: https://auth.your-domain (default auth.srv1.example.com)",

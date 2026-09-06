@@ -24,7 +24,7 @@ if [[ -z "${PUBLIC_IP}" || -z "${DOMAIN}" ]]; then
   exit 1
 fi
 
-if command -v k3s >/dev/null 2>&1 && systemctl is-active k3s &>/dev/null; then
+if [[ "${SKIP_K3S:-no}" == "yes" ]] || { command -v k3s >/dev/null 2>&1 && systemctl is-active k3s &>/dev/null; }; then
   log "K3s is already running — skipping K3s install"
   wait_for_k3s
   exec "${SHARE}/platform-bootstrap.sh"

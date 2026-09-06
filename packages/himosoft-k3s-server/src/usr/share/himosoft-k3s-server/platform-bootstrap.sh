@@ -31,6 +31,12 @@ DASHBOARD_MANIFEST="https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.
 TRAEFIK_CHART_VERSION="${TRAEFIK_CHART_VERSION:-}"
 
 install_traefik() {
+  if [[ "${SKIP_TRAEFIK:-no}" == "yes" ]]; then
+    log "Traefik already installed — skipping (declined reconfigure or unchanged)"
+    check_dns_for_ssl
+    return 0
+  fi
+
   check_dns_for_ssl
 
   if helm status traefik -n traefik >/dev/null 2>&1; then
@@ -66,6 +72,11 @@ install_traefik() {
 }
 
 install_argocd() {
+  if [[ "${SKIP_ARGOCD:-no}" == "yes" ]]; then
+    log "Argo CD already installed — skipping"
+    return 0
+  fi
+
   if [[ "${INSTALL_ARGOCD:-yes}" != "yes" ]]; then
     log "Skipping Argo CD (not selected)"
     return 0
@@ -102,6 +113,11 @@ install_argocd() {
 }
 
 install_k8s_dashboard() {
+  if [[ "${SKIP_DASHBOARD:-no}" == "yes" ]]; then
+    log "Kubernetes Dashboard already installed — skipping"
+    return 0
+  fi
+
   if deployment_ready kubernetes-dashboard kubernetes-dashboard; then
     log "Kubernetes Dashboard already running"
     k apply -f "${SHARE}/manifests/dashboard-admin.yaml"
@@ -119,6 +135,11 @@ install_k8s_dashboard() {
 }
 
 install_ingressroutes() {
+  if [[ "${SKIP_INGRESS:-no}" == "yes" ]]; then
+    log "Ingress routes unchanged — skipping"
+    return 0
+  fi
+
   apply_dashboard_ingress
   if [[ "${INSTALL_ARGOCD:-yes}" == "yes" ]]; then
     configure_argocd_ingress
@@ -231,4 +252,11 @@ install_authelia
 install_argocd
 install_k8s_dashboard
 install_ingressroutes
+
+if [[ "${SKIP_TRAEFIK:-no}" == yes && "${SKIP_AUTHELIA:-no}" == yes \
+   && "${SKIP_ARGOCD:-no}" == yes && "${SKIP_DASHBOARD:-no}" == yes \
+   && "${SKIP_INGRESS:-no}" == yes ]]; then
+  log "All platform components already installed — no changes applied"
+fi
+
 print_summary
