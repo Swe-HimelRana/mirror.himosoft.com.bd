@@ -24,6 +24,7 @@ Usage:
 Features:
   - Auto-detects public IP (Enter to accept)
   - Verifies DNS before Let's Encrypt; skips SSL if DNS not ready
+  - Prompts for Let's Encrypt notification email
   - Optional Argo CD install
   - Real HTTPS via Traefik + Let's Encrypt when DNS is configured
 
@@ -129,11 +130,16 @@ prompt_install_config() {
   hs_prompt_default TRAEFIK_FQDN "Traefik dashboard hostname" "traefik.${DOMAIN}"
 
   echo ""
-  echo "Step 4 — K3s version (optional)"
-  echo "──────────────────────────────"
-  hs_prompt_optional K3S_VERSION "K3s version (empty = latest from get.k3s.io)"
+  echo "Step 4 — Let's Encrypt"
+  echo "──────────────────────"
+  echo "Used for Argo CD, Dashboard, and Traefik HTTPS certificates."
+  hs_prompt_default ACME_EMAIL "Let's Encrypt email" "admin@${DOMAIN}"
+  [[ -n "${ACME_EMAIL}" ]] || { echo "Email is required for Let's Encrypt."; exit 1; }
 
-  ACME_EMAIL="admin@${DOMAIN}"
+  echo ""
+  echo "Step 5 — K3s version (optional)"
+  echo "───────────────────────────────"
+  hs_prompt_optional K3S_VERSION "K3s version (empty = latest from get.k3s.io)"
 
   echo ""
   echo "══════════════════════════════════════════════════"
@@ -142,6 +148,7 @@ prompt_install_config() {
   echo "  Public IP              : ${PUBLIC_IP}"
   echo "  Base domain            : ${DOMAIN}"
   echo "  Install Argo CD        : ${INSTALL_ARGOCD}"
+  echo "  Let's Encrypt email    : ${ACME_EMAIL}"
   echo ""
   if [[ "${INSTALL_ARGOCD}" == "yes" ]]; then
     echo "  Argo CD                : https://${ARGOCD_FQDN}"
@@ -205,6 +212,11 @@ cmd_fix_ssl() {
   load_conf 2>/dev/null || true
   [[ -f "${CONF}" ]] || { echo "No config. Run install first."; exit 1; }
   hs_banner "Enable Let's Encrypt SSL"
+  if [[ -z "${ACME_EMAIL:-}" ]]; then
+    hs_prompt_default ACME_EMAIL "Let's Encrypt email" "admin@${DOMAIN:-example.com}"
+    [[ -n "${ACME_EMAIL}" ]] || { echo "Email is required."; exit 1; }
+    save_conf
+  fi
   export_install_vars
   # shellcheck source=/dev/null
   source "${SHARE}/lib.sh"

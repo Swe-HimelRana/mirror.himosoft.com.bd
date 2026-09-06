@@ -19,7 +19,7 @@
     },
     {
       "title": "Run interactive setup",
-      "body": "Prompts for public IP (auto-detected default), base domain, hostnames, optional Argo CD, and ACME email. Installs K3s, Traefik, dashboards, and ingress.",
+      "body": "Prompts for public IP, base domain, hostnames, Let's Encrypt email, and optional Argo CD. Installs K3s, Traefik, dashboards, and ingress.",
       "command": "sudo himosoft-k3s-server install"
     },
     {
@@ -48,7 +48,8 @@
     { "command": "sudo himosoft-k3s-server credentials", "description": "Argo CD password and dashboard token" }
   ],
   "notes": [
-    "Config is saved to /etc/himosoft/k3s-server.conf",
+    "Config is saved to /etc/himosoft/k3s-server.conf (includes ACME_EMAIL)",
+    "Let's Encrypt email is prompted at install — default admin@your-domain",
     "Argo CD install is optional — answer Y/n at the prompt",
     "If Argo CD shows a blank page or redirect loop, run fix-ingress",
     "Traefik is pre-installed — skip duplicate Traefik in GitOps Phase 2 or adopt the existing release",

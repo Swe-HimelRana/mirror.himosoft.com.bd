@@ -59,14 +59,6 @@
     return `/packages/${encodeURIComponent(pkg.name)}.html`;
   }
 
-  function packageCategory(pkg) {
-    const tags = pkg.tags || [];
-    for (let i = 0; i < tags.length; i++) {
-      if (CATEGORY[tags[i]]) return CATEGORY[tags[i]];
-    }
-    return { label: 'Package', icon: 'Pkg', tone: 'default' };
-  }
-
   function packageMatches(pkg, query, tag) {
     if (tag && tag !== 'all') {
       const tags = pkg.tags || [];
@@ -133,76 +125,47 @@
     block.classList.remove('loading');
   }
 
-  function renderStatusBadge(status) {
-    const label = STATUS_LABEL[status] || status;
-    return `<span class="pkg-card__status pkg-card__status--${esc(status)}">${esc(label)}</span>`;
-  }
-
-  function renderTags(tags, status) {
-    const visible = (tags || []).filter(function (t) {
-      return t !== 'stable' && t !== 'planned';
-    });
-    const items = visible
-      .slice(0, 4)
-      .map(function (t) {
-        return `<span class="pkg-tag">${esc(t)}</span>`;
-      })
-      .join('');
-    return items || `<span class="pkg-tag pkg-tag--muted">${esc(status)}</span>`;
-  }
-
   function renderPackageCard(pkg) {
     const status = pkg.status || 'planned';
     const hasDocs = !!(pkg.docsUrl || pkg.docs);
     const docsHref = packageDocsHref(pkg);
-    const cat = packageCategory(pkg);
-    const tone = cat.tone || 'default';
 
-    let meta = '';
+    const tags = (pkg.tags || [])
+      .filter(function (t) {
+        return t !== 'stable' && t !== 'planned';
+      })
+      .slice(0, 5)
+      .map(function (t) {
+        return `<span class="pkg-row__tag">${esc(t)}</span>`;
+      })
+      .join('');
+
+    let version = '';
     if (pkg.deb) {
-      meta = `<div class="pkg-card__meta">v${esc(pkg.version)} · ${esc(pkg.architecture)} · ${formatBytes(pkg.deb.sizeBytes)}</div>`;
+      version = `<span class="pkg-row__version">v${esc(pkg.version)}</span>`;
     } else if (status === 'planned') {
-      meta = '<div class="pkg-card__meta pkg-card__meta--muted">Not published yet</div>';
-    } else if (status === 'missing') {
-      meta = '<div class="pkg-card__meta pkg-card__meta--warn">Build artifact missing</div>';
+      version = '<span class="pkg-row__version pkg-row__version--muted">Soon</span>';
     }
 
-    const install =
-      pkg.installCommand && status === 'available'
-        ? `<div class="pkg-card__install"><code>${esc(pkg.installCommand)}</code></div>`
-        : '';
-
-    const usage =
-      pkg.usageCommand && pkg.usageCommand !== pkg.installCommand && status === 'available'
-        ? `<div class="pkg-card__usage">Then: <code>${esc(pkg.usageCommand)}</code></div>`
-        : '';
-
-    const footer = `
-      <div class="pkg-card__footer">
-        <div class="pkg-card__tags">${renderTags(pkg.tags, status)}</div>
-        ${hasDocs ? '<span class="pkg-card__cta">View guide <span aria-hidden="true">→</span></span>' : ''}
-      </div>`;
-
     const inner = `
-      <div class="pkg-card__accent"></div>
-      <div class="pkg-card__body">
-        <div class="pkg-card__header">
-          <span class="pkg-card__icon pkg-card__icon--${esc(tone)}" aria-hidden="true">${esc(cat.icon)}</span>
-          ${renderStatusBadge(status)}
+      <div class="pkg-row__main">
+        <div class="pkg-row__head">
+          <h3 class="pkg-row__title">${esc(pkg.title)}</h3>
+          <span class="pkg-row__status pkg-row__status--${esc(status)}">${esc(STATUS_LABEL[status] || status)}</span>
         </div>
-        <h3 class="pkg-card__title">${esc(pkg.title)}</h3>
-        <div class="pkg-card__name">${esc(pkg.name)}</div>
-        <p class="pkg-card__desc">${esc(pkg.description)}</p>
-        ${meta}
-        ${install}
-        ${usage}
-        ${footer}
+        <div class="pkg-row__name">${esc(pkg.name)}</div>
+        <p class="pkg-row__desc">${esc(pkg.description)}</p>
+        ${tags ? `<div class="pkg-row__tags">${tags}</div>` : ''}
+      </div>
+      <div class="pkg-row__aside">
+        ${version}
+        ${hasDocs ? '<span class="pkg-row__arrow" aria-hidden="true">→</span>' : ''}
       </div>`;
 
     if (hasDocs) {
-      return `<a class="pkg-card pkg-card--link pkg-card--${esc(tone)} status-${esc(status)}" href="${esc(docsHref)}">${inner}</a>`;
+      return `<a class="pkg-row pkg-row--link status-${esc(status)}" href="${esc(docsHref)}">${inner}</a>`;
     }
-    return `<article class="pkg-card pkg-card--${esc(tone)} status-${esc(status)}">${inner}</article>`;
+    return `<article class="pkg-row status-${esc(status)}">${inner}</article>`;
   }
 
   function updateMeta(data, visibleCount) {
