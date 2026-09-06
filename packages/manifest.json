@@ -21,7 +21,7 @@
     {
       "name": "himosoft-k3s-server",
       "title": "K3s cluster bootstrap",
-      "description": "Installs K3s, Traefik, Argo CD, and Kubernetes Dashboard. Ingress at acd.*, dash.*, traefik.* on your domain.",
+      "description": "K3s bootstrap with Traefik, optional Argo CD, K8s Dashboard, Let's Encrypt if DNS ready.",
       "status": "available",
       "architecture": "all",
       "depends": ["curl", "ca-certificates", "himosoft-common"],

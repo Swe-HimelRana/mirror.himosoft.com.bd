@@ -1,0 +1,20 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`@ARGOCD_FQDN@`)
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: argocd-headers
+          namespace: argocd
+      services:
+        - name: argocd-server
+          port: 80
+          passHostHeader: true
+@TLS_BLOCK@

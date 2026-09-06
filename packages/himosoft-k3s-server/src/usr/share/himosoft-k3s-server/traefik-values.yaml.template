@@ -1,4 +1,4 @@
-# Traefik bootstrap values — hostname replaced at install time.
+# Traefik bootstrap values — hostnames replaced at install time.
 deployment:
   replicas: 1
 
@@ -11,6 +11,7 @@ ingressRoute:
     matchRule: Host(`@TRAEFIK_FQDN@`)
     entryPoints:
       - websecure
+@TRAEFIK_DASHBOARD_TLS@
 
 gateway:
   enabled: false

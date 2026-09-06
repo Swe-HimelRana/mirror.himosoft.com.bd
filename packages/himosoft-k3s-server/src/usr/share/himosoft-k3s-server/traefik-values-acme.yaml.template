@@ -1,0 +1,13 @@
+# Let's Encrypt via Traefik ACME (appended when DNS is verified).
+persistence:
+  enabled: true
+  path: /data
+  size: 128Mi
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: @ACME_EMAIL@
+      storage: /data/acme.json
+      httpChallenge:
+        entryPoint: web

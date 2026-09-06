@@ -96,7 +96,96 @@ apply_template() {
     -e "s|@ARGOCD_FQDN@|${ARGOCD_FQDN}|g" \
     -e "s|@DASH_FQDN@|${DASH_FQDN}|g" \
     -e "s|@TRAEFIK_FQDN@|${TRAEFIK_FQDN}|g" \
+    -e "s|@ACME_EMAIL@|${ACME_EMAIL:-admin@${DOMAIN}}|g" \
     "${template}"
+}
+
+detect_public_ip() {
+  curl -fsSL -4 --max-time 5 ifconfig.me 2>/dev/null \
+    || curl -fsSL -4 --max-time 5 icanhazip.com 2>/dev/null \
+    || curl -fsSL -4 --max-time 5 api.ipify.org 2>/dev/null \
+    || true
+}
+
+dns_points_to_ip() {
+  local fqdn="$1" expected="$2"
+  local resolved=""
+  resolved="$(getent ahostsv4 "${fqdn}" 2>/dev/null | awk '{print $1; exit}')"
+  if [[ -z "${resolved}" ]]; then
+    resolved="$(dig +short "${fqdn}" A 2>/dev/null | tail -1)"
+  fi
+  [[ -n "${resolved}" && "${resolved}" == "${expected}" ]]
+}
+
+render_tls_block() {
+  local fqdn="$1"
+  if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
+    cat <<EOF
+  tls:
+    certResolver: letsencrypt
+    domains:
+      - main: "${fqdn}"
+EOF
+  else
+    echo "  tls: {}"
+  fi
+}
+
+apply_template_with_tls() {
+  local template="$1" fqdn="$2"
+  local tls_block line
+  tls_block="$(render_tls_block "${fqdn}")"
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" == *"@TLS_BLOCK@"* ]]; then
+      echo "${tls_block}"
+    else
+      echo "${line}"
+    fi
+  done < <(apply_template "${template}")
+}
+
+check_dns_for_ssl() {
+  local fqdn all_ok=1
+  local -a fqdns=("${TRAEFIK_FQDN}" "${DASH_FQDN}")
+  if [[ "${INSTALL_ARGOCD:-yes}" == "yes" && -n "${ARGOCD_FQDN:-}" ]]; then
+    fqdns+=("${ARGOCD_FQDN}")
+  fi
+
+  log "Checking DNS before Let's Encrypt..."
+  for fqdn in "${fqdns[@]}"; do
+    if dns_points_to_ip "${fqdn}" "${PUBLIC_IP}"; then
+      log "  OK  ${fqdn} -> ${PUBLIC_IP}"
+    else
+      warn "  FAIL ${fqdn} does not resolve to ${PUBLIC_IP}"
+      all_ok=0
+    fi
+  done
+
+  if [[ "${all_ok}" -eq 1 ]]; then
+    ENABLE_LETSENCRYPT=yes
+    log "DNS verified — Let's Encrypt SSL will be enabled"
+  else
+    ENABLE_LETSENCRYPT=no
+    warn "DNS not ready — skipping Let's Encrypt (Traefik default cert for now)"
+    warn "After fixing DNS, run: sudo himosoft-k3s-server fix-ssl"
+  fi
+  export ENABLE_LETSENCRYPT
+}
+
+write_traefik_values() {
+  local share="${SHARE:-/usr/share/himosoft-k3s-server}"
+  local out="/etc/himosoft/traefik-values.yaml"
+  mkdir -p /etc/himosoft
+  local dashboard_tls=""
+  if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
+    dashboard_tls=$'    tls:\n      certResolver: letsencrypt'
+  fi
+  apply_template "${share}/traefik-values.yaml.template" \
+    | sed "s|@TRAEFIK_DASHBOARD_TLS@|${dashboard_tls}|g" > "${out}"
+  if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
+    apply_template "${share}/traefik-values-acme.yaml.template" >> "${out}"
+  fi
+  chmod 600 "${out}"
 }
 
 # Argo CD install.yaml requires -n argocd; without it workloads land in default.
@@ -131,4 +220,43 @@ argocd_admin_password() {
     k get secret argocd-initial-admin-secret -n default \
       -o jsonpath='{.data.password}' | base64 -d 2>/dev/null || true
   fi
+}
+
+configure_argocd_ingress() {
+  local share="${SHARE:-/usr/share/himosoft-k3s-server}"
+  : "${ARGOCD_FQDN:?ARGOCD_FQDN not set}"
+
+  if ! k get deployment argocd-server -n argocd >/dev/null 2>&1; then
+    warn "Argo CD not in namespace argocd — skipping ingress"
+    return 0
+  fi
+
+  log "Configuring Argo CD for Traefik ingress (TLS terminated at edge)"
+
+  k patch configmap argocd-cm -n argocd --type merge -p "$(cat <<EOF
+{
+  "data": {
+    "url": "https://${ARGOCD_FQDN}",
+    "server.insecure": "true",
+    "server.redirect.to.https": "false",
+    "application.resourceTrackingMethod": "annotation"
+  }
+}
+EOF
+)"
+
+  if k get configmap argocd-cmd-params-cm -n argocd >/dev/null 2>&1; then
+    k patch configmap argocd-cmd-params-cm -n argocd --type merge -p '{"data":{"server.insecure":"true"}}'
+  fi
+
+  k apply -f "${share}/manifests/argocd-middleware.yaml"
+  apply_template_with_tls "${share}/manifests/ingressroutes-argocd.yaml.template" "${ARGOCD_FQDN}" | k apply -f -
+
+  k rollout restart deployment/argocd-server -n argocd
+  wait_for_deployment argocd argocd-server 300
+}
+
+apply_dashboard_ingress() {
+  local share="${SHARE:-/usr/share/himosoft-k3s-server}"
+  apply_template_with_tls "${share}/manifests/ingressroutes-dashboard.yaml.template" "${DASH_FQDN}" | k apply -f -
 }

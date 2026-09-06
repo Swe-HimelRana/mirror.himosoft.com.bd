@@ -1,20 +1,4 @@
 apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: argocd
-  namespace: argocd
-spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`@ARGOCD_FQDN@`)
-      kind: Rule
-      services:
-        - name: argocd-server
-          port: 80
-  tls: {}
----
-apiVersion: traefik.io/v1alpha1
 kind: ServersTransport
 metadata:
   name: dashboard-insecure
@@ -38,4 +22,5 @@ spec:
           port: 443
           scheme: https
           serversTransport: dashboard-insecure
-  tls: {}
+          passHostHeader: true
+@TLS_BLOCK@
