@@ -384,7 +384,7 @@ users:
     disabled: false
     displayname: "${AUTHELIA_ADMIN_DISPLAY_NAME:-Admin}"
     password: "${hash}"
-    email: ${AUTHELIA_ADMIN_EMAIL}
+    email: "${AUTHELIA_ADMIN_EMAIL}"
     groups:
       - admins
 EOF
@@ -611,6 +611,7 @@ install_authelia() {
   if k get deployment authelia -n authelia >/dev/null 2>&1; then
     log "Authelia already installed — syncing admin account and refreshing routes"
     sync_authelia_users_secret
+    k apply -f "${share}/manifests/authelia/deployment.yaml"
     k rollout restart deployment/authelia -n authelia 2>/dev/null || true
     wait_for_deployment authelia authelia 600
     apply_template "${share}/manifests/authelia/middleware-forwardauth.yaml.template" | k apply -f -
@@ -650,7 +651,8 @@ install_authelia() {
   rm -f "${tmp_cfg}"
 
   k apply -f "${share}/manifests/authelia/deployment.yaml"
-  wait_for_deployment authelia authelia 600
+  k rollout status deployment/authelia -n authelia --timeout=600s 2>/dev/null \
+    || wait_for_deployment authelia authelia 600
 
   apply_template "${share}/manifests/authelia/middleware-forwardauth.yaml.template" | k apply -f -
   apply_template_ingress "${share}/manifests/authelia/ingressroute.yaml.template" "${AUTH_FQDN}" | k apply -f -
