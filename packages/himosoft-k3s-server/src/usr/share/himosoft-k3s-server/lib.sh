@@ -176,12 +176,19 @@ write_traefik_values() {
   local share="${SHARE:-/usr/share/himosoft-k3s-server}"
   local out="/etc/himosoft/traefik-values.yaml"
   mkdir -p /etc/himosoft
-  local dashboard_tls=""
+  local tls_block="" line
   if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
-    dashboard_tls=$'    tls:\n      certResolver: letsencrypt'
+    tls_block=$'    tls:\n      certResolver: letsencrypt'
   fi
-  apply_template "${share}/traefik-values.yaml.template" \
-    | sed "s|@TRAEFIK_DASHBOARD_TLS@|${dashboard_tls}|g" > "${out}"
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" == *"@TRAEFIK_DASHBOARD_TLS@"* ]]; then
+      if [[ -n "${tls_block}" ]]; then
+        printf '%b\n' "${tls_block}"
+      fi
+    else
+      echo "${line}"
+    fi
+  done < <(apply_template "${share}/traefik-values.yaml.template") > "${out}"
   if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
     apply_template "${share}/traefik-values-acme.yaml.template" >> "${out}"
   fi
