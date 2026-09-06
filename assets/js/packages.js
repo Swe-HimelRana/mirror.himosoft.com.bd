@@ -5,6 +5,39 @@
   const PACKAGES_URL = 'packages.json';
   let catalog = null;
   let searchQuery = '';
+  let activeTag = 'all';
+
+  const CATEGORY = {
+    k3s: { label: 'Kubernetes', icon: 'K8s', tone: 'k8s' },
+    kubernetes: { label: 'Kubernetes', icon: 'K8s', tone: 'k8s' },
+    argocd: { label: 'GitOps', icon: 'Git', tone: 'k8s' },
+    traefik: { label: 'Ingress', icon: 'Ing', tone: 'k8s' },
+    docker: { label: 'Docker', icon: 'Dkr', tone: 'docker' },
+    monitoring: { label: 'Monitoring', icon: 'Mon', tone: 'monitor' },
+    grafana: { label: 'Grafana', icon: 'Gfn', tone: 'monitor' },
+    prometheus: { label: 'Prometheus', icon: 'Prm', tone: 'monitor' },
+    dashboard: { label: 'Dashboard', icon: 'Dash', tone: 'monitor' },
+    htop: { label: 'Dashboard', icon: 'Dash', tone: 'monitor' },
+    security: { label: 'Security', icon: 'Sec', tone: 'security' },
+    database: { label: 'Database', icon: 'DB', tone: 'database' },
+    replica: { label: 'Replica', icon: 'Rep', tone: 'database' },
+    backup: { label: 'Backup', icon: 'Bak', tone: 'backup' },
+    restic: { label: 'Backup', icon: 'Bak', tone: 'backup' },
+    tools: { label: 'Tools', icon: 'Ops', tone: 'tools' },
+    performance: { label: 'Performance', icon: 'Tune', tone: 'tools' },
+    diagnostics: { label: 'Diagnostics', icon: 'Diag', tone: 'diagnostics' },
+    library: { label: 'Library', icon: 'Lib', tone: 'library' },
+    kubectl: { label: 'Kubernetes', icon: 'K8s', tone: 'k8s' },
+    'server-a': { label: 'Server A', icon: 'A', tone: 'server' },
+    'server-b': { label: 'Server B', icon: 'B', tone: 'server' },
+    'server-c': { label: 'Server C', icon: 'C', tone: 'server' },
+  };
+
+  const STATUS_LABEL = {
+    available: 'Available',
+    planned: 'Coming soon',
+    missing: 'Build missing',
+  };
 
   function esc(s) {
     const d = document.createElement('div');
@@ -19,7 +52,26 @@
     return (n / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
-  function packageMatches(pkg, query) {
+  function packageDocsHref(pkg) {
+    if (pkg.docsUrl) {
+      return pkg.docsUrl.startsWith('/') ? pkg.docsUrl : '/' + pkg.docsUrl.replace(/^\/+/, '');
+    }
+    return `/packages/${encodeURIComponent(pkg.name)}.html`;
+  }
+
+  function packageCategory(pkg) {
+    const tags = pkg.tags || [];
+    for (let i = 0; i < tags.length; i++) {
+      if (CATEGORY[tags[i]]) return CATEGORY[tags[i]];
+    }
+    return { label: 'Package', icon: 'Pkg', tone: 'default' };
+  }
+
+  function packageMatches(pkg, query, tag) {
+    if (tag && tag !== 'all') {
+      const tags = pkg.tags || [];
+      if (!tags.includes(tag)) return false;
+    }
     if (!query) return true;
     const haystack = [
       pkg.name,
@@ -40,8 +92,25 @@
     if (!catalog) return [];
     const query = searchQuery.trim().toLowerCase();
     return catalog.packages.filter(function (pkg) {
-      return packageMatches(pkg, query);
+      return packageMatches(pkg, query, activeTag);
     });
+  }
+
+  function collectFilterTags(packages) {
+    const counts = {};
+    packages.forEach(function (pkg) {
+      (pkg.tags || []).forEach(function (tag) {
+        if (tag === 'stable' || tag === 'planned') return;
+        counts[tag] = (counts[tag] || 0) + 1;
+      });
+    });
+    return Object.keys(counts)
+      .sort(function (a, b) {
+        return counts[b] - counts[a] || a.localeCompare(b);
+      })
+      .map(function (tag) {
+        return { tag: tag, count: counts[tag], label: (CATEGORY[tag] && CATEGORY[tag].label) || tag };
+      });
   }
 
   function renderHero(featured) {
@@ -64,59 +133,76 @@
     block.classList.remove('loading');
   }
 
+  function renderStatusBadge(status) {
+    const label = STATUS_LABEL[status] || status;
+    return `<span class="pkg-card__status pkg-card__status--${esc(status)}">${esc(label)}</span>`;
+  }
+
+  function renderTags(tags, status) {
+    const visible = (tags || []).filter(function (t) {
+      return t !== 'stable' && t !== 'planned';
+    });
+    const items = visible
+      .slice(0, 4)
+      .map(function (t) {
+        return `<span class="pkg-tag">${esc(t)}</span>`;
+      })
+      .join('');
+    return items || `<span class="pkg-tag pkg-tag--muted">${esc(status)}</span>`;
+  }
+
   function renderPackageCard(pkg) {
     const status = pkg.status || 'planned';
     const hasDocs = !!(pkg.docsUrl || pkg.docs);
-    const docsHref = pkg.docsUrl || `packages/${encodeURIComponent(pkg.name)}.html`;
-    const tags = (pkg.tags || [])
-      .map(function (t) {
-        const cls = t === 'stable' || t === 'planned' ? 'status-' + t : '';
-        return `<span class="tag-item ${cls}">${esc(t)}</span>`;
-      })
-      .join('');
+    const docsHref = packageDocsHref(pkg);
+    const cat = packageCategory(pkg);
+    const tone = cat.tone || 'default';
 
-    let extra = '';
+    let meta = '';
     if (pkg.deb) {
-      extra =
-        `<div class="pkg-version">v${esc(pkg.version)} · ${esc(pkg.architecture)} · ${formatBytes(pkg.deb.sizeBytes)}</div>` +
-        `<a class="deb-link" href="${esc(pkg.deb.url)}">${esc(pkg.deb.filename)}</a>`;
+      meta = `<div class="pkg-card__meta">v${esc(pkg.version)} · ${esc(pkg.architecture)} · ${formatBytes(pkg.deb.sizeBytes)}</div>`;
     } else if (status === 'planned') {
-      extra = '<span class="tag">coming soon</span>';
+      meta = '<div class="pkg-card__meta pkg-card__meta--muted">Not published yet</div>';
     } else if (status === 'missing') {
-      extra = '<span class="tag" style="color:#f87171">build missing</span>';
+      meta = '<div class="pkg-card__meta pkg-card__meta--warn">Build artifact missing</div>';
     }
 
     const install =
       pkg.installCommand && status === 'available'
-        ? `<div class="tag-item" style="margin-top:0.5rem;font-family:var(--mono)">${esc(pkg.installCommand)}</div>`
+        ? `<div class="pkg-card__install"><code>${esc(pkg.installCommand)}</code></div>`
         : '';
 
-    const cta = hasDocs ? '<span class="card-cta">View instructions →</span>' : '';
+    const usage =
+      pkg.usageCommand && pkg.usageCommand !== pkg.installCommand && status === 'available'
+        ? `<div class="pkg-card__usage">Then: <code>${esc(pkg.usageCommand)}</code></div>`
+        : '';
+
+    const footer = `
+      <div class="pkg-card__footer">
+        <div class="pkg-card__tags">${renderTags(pkg.tags, status)}</div>
+        ${hasDocs ? '<span class="pkg-card__cta">View guide <span aria-hidden="true">→</span></span>' : ''}
+      </div>`;
+
+    const inner = `
+      <div class="pkg-card__accent"></div>
+      <div class="pkg-card__body">
+        <div class="pkg-card__header">
+          <span class="pkg-card__icon pkg-card__icon--${esc(tone)}" aria-hidden="true">${esc(cat.icon)}</span>
+          ${renderStatusBadge(status)}
+        </div>
+        <h3 class="pkg-card__title">${esc(pkg.title)}</h3>
+        <div class="pkg-card__name">${esc(pkg.name)}</div>
+        <p class="pkg-card__desc">${esc(pkg.description)}</p>
+        ${meta}
+        ${install}
+        ${usage}
+        ${footer}
+      </div>`;
 
     if (hasDocs) {
-      return `
-      <a class="card card-link status-${esc(status)}" href="${esc(docsHref)}">
-        <div class="pkg-name">${esc(pkg.name)}</div>
-        <h3>${esc(pkg.title)}</h3>
-        ${extra}
-        <p>${esc(pkg.description)}</p>
-        ${install}
-        <div class="tags">${tags}</div>
-        ${cta}
-      </a>
-    `;
+      return `<a class="pkg-card pkg-card--link pkg-card--${esc(tone)} status-${esc(status)}" href="${esc(docsHref)}">${inner}</a>`;
     }
-
-    return `
-      <article class="card status-${esc(status)}">
-        <div class="pkg-name">${esc(pkg.name)}</div>
-        <h3>${esc(pkg.title)}</h3>
-        ${extra}
-        <p>${esc(pkg.description)}</p>
-        ${install}
-        <div class="tags">${tags}</div>
-      </article>
-    `;
+    return `<article class="pkg-card pkg-card--${esc(tone)} status-${esc(status)}">${inner}</article>`;
   }
 
   function updateMeta(data, visibleCount) {
@@ -127,12 +213,12 @@
     const query = searchQuery.trim();
     let countLine = '';
 
-    if (query) {
-      countLine = `<span>${visibleCount} of ${total} shown</span> · `;
+    if (query || activeTag !== 'all') {
+      countLine = `<span class="meta-highlight">${visibleCount}</span> of ${total} shown · `;
     } else {
       countLine =
-        `<span>${data.packageCount.available} available</span> · ` +
-        `<span>${data.packageCount.planned} planned</span> · `;
+        `<span class="meta-highlight">${data.packageCount.available}</span> available · ` +
+        `${data.packageCount.planned} planned · `;
     }
 
     if (data.generatedAt) {
@@ -141,6 +227,41 @@
     }
 
     meta.innerHTML = countLine;
+  }
+
+  function renderTagFilters() {
+    const wrap = document.querySelector('[data-tag-filters]');
+    if (!wrap || !catalog) return;
+
+    const tags = collectFilterTags(catalog.packages);
+    if (tags.length === 0) {
+      wrap.hidden = true;
+      return;
+    }
+
+    wrap.hidden = false;
+    const buttons = [{ tag: 'all', label: 'All', count: catalog.packages.length }]
+      .concat(tags)
+      .map(function (item) {
+        const active = activeTag === item.tag ? ' is-active' : '';
+        return (
+          `<button type="button" class="tag-filter${active}" data-tag="${esc(item.tag)}">` +
+          `${esc(item.label)} <span class="tag-filter__count">${item.count}</span>` +
+          '</button>'
+        );
+      })
+      .join('');
+
+    wrap.innerHTML = buttons;
+    wrap.querySelectorAll('.tag-filter').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        activeTag = btn.getAttribute('data-tag') || 'all';
+        wrap.querySelectorAll('.tag-filter').forEach(function (b) {
+          b.classList.toggle('is-active', b === btn);
+        });
+        renderPackages();
+      });
+    });
   }
 
   function renderPackages() {
@@ -154,7 +275,7 @@
     if (packages.length === 0) {
       grid.innerHTML = '';
       grid.classList.remove('loading');
-      if (empty) empty.hidden = !searchQuery.trim();
+      if (empty) empty.hidden = !(searchQuery.trim() || activeTag !== 'all');
       return;
     }
 
@@ -205,7 +326,7 @@
   function showError(msg) {
     const grid = document.querySelector('[data-packages-grid]');
     if (grid) {
-      grid.innerHTML = `<p class="loading">${esc(msg)}</p>`;
+      grid.innerHTML = `<div class="pkg-error">${esc(msg)}</div>`;
       grid.classList.remove('loading');
     }
   }
@@ -219,6 +340,7 @@
       catalog = data;
       renderHero(data.featuredInstall);
       setupSearch();
+      renderTagFilters();
       renderPackages();
     })
     .catch(function (err) {

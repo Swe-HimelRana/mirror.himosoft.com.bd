@@ -84,7 +84,7 @@ def main() -> int:
         docs = entry.get("docs") or load_docs(name)
         if docs:
             pkg_out["docs"] = docs
-            pkg_out["docsUrl"] = f"packages/{name}.html"
+            pkg_out["docsUrl"] = f"/packages/{name}.html"
 
         deb_path = deb_index.get(name)
         if deb_path and entry.get("status") == "available":

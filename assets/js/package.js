@@ -5,6 +5,13 @@
 (function () {
   const PACKAGES_URL = '../packages.json';
 
+  function packageDocsHref(pkg) {
+    if (pkg.docsUrl) {
+      return pkg.docsUrl.startsWith('/') ? pkg.docsUrl : '/' + pkg.docsUrl.replace(/^\/+/, '');
+    }
+    return `/packages/${encodeURIComponent(pkg.name)}.html`;
+  }
+
   function esc(s) {
     const d = document.createElement('div');
     d.textContent = s ?? '';
@@ -107,7 +114,7 @@
           return p.name === name;
         });
         if (!pkg) return `<li><code>${esc(name)}</code></li>`;
-        const href = pkg.docsUrl || `../package.html?p=${encodeURIComponent(name)}`;
+        const href = packageDocsHref(pkg);
         return `<li><a href="${esc(href)}">${esc(pkg.title || name)}</a> <span class="muted">(${esc(name)})</span></li>`;
       })
       .join('');

@@ -42,25 +42,43 @@
       </div>
     </section>
 
-    <section id="packages">
-      <div class="container">
-        <h2>Packages</h2>
-        <p class="meta-bar" data-packages-meta>Loading package index…</p>
-        <div class="package-search" data-package-search hidden>
-          <label class="sr-only" for="package-search-input">Search packages</label>
-          <input
-            type="search"
-            id="package-search-input"
-            class="package-search-input"
-            placeholder="Search by name, description, or tag…"
-            autocomplete="off"
-            spellcheck="false"
-          >
-          <button type="button" class="package-search-clear" data-search-clear hidden aria-label="Clear search">×</button>
+    <section id="packages" class="packages-section">
+      <div class="container container-wide">
+        <div class="section-head">
+          <div>
+            <h2>Package catalog</h2>
+            <p class="section-subtitle">Install with APT, then follow each package's step-by-step guide.</p>
+          </div>
+          <p class="meta-bar" data-packages-meta>Loading package index…</p>
         </div>
-        <p class="search-empty" data-search-empty hidden>No packages match your search.</p>
-        <div class="grid loading" data-packages-grid>
-          Loading packages…
+
+        <div class="packages-toolbar">
+          <div class="package-search" data-package-search hidden>
+            <svg class="package-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/>
+            </svg>
+            <label class="sr-only" for="package-search-input">Search packages</label>
+            <input
+              type="search"
+              id="package-search-input"
+              class="package-search-input"
+              placeholder="Search packages…"
+              autocomplete="off"
+              spellcheck="false"
+            >
+            <button type="button" class="package-search-clear" data-search-clear hidden aria-label="Clear search">×</button>
+          </div>
+          <div class="tag-filters" data-tag-filters hidden role="group" aria-label="Filter by category"></div>
+        </div>
+
+        <p class="search-empty" data-search-empty hidden>No packages match your search or filter.</p>
+        <div class="pkg-grid loading" data-packages-grid>
+          <div class="pkg-skeleton"></div>
+          <div class="pkg-skeleton"></div>
+          <div class="pkg-skeleton"></div>
+          <div class="pkg-skeleton"></div>
+          <div class="pkg-skeleton"></div>
+          <div class="pkg-skeleton"></div>
         </div>
       </div>
     </section>
@@ -75,7 +93,7 @@
           </li>
           <li>
             <strong>Pick a package</strong>
-            Browse the catalog above — each card shows the install command.
+            Browse the catalog — filter by category, search, then open the guide.
           </li>
           <li>
             <strong>Install with APT</strong>

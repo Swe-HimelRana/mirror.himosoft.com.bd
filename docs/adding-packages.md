@@ -74,6 +74,6 @@ Generated at `https://mirror.himosoft.com.bd/packages.json`:
 | `packages[].deb.url` | Direct download link when built |
 | `packages[].version` | From `.deb` control file |
 | `packages[].docs` | Merged from `packages/docs/<name>.json` |
-| `packages[].docsUrl` | Link to `packages/<name>.html` instructions page |
+| `packages[].docsUrl` | Link to `/packages/<name>.html` instructions page |
 
 The landing page loads `packages.json` dynamically. Package cards link to their instructions page when docs exist.
