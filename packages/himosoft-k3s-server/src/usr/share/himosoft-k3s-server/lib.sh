@@ -266,15 +266,63 @@ build_protected_domains_yaml() {
 }
 
 generate_authelia_password_hash() {
-  local password="$1" job="authelia-hash-$$" hash=""
+  local password="$1" job="authelia-hash-$$" secret="${job}-pw" hash="" tmp_job="/tmp/${job}.yaml"
+
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    hash="$(docker run --rm docker.io/authelia/authelia:4.38.5 \
+      authelia crypto hash generate argon2 --password "${password}" --no-confirm 2>/dev/null \
+      | awk '/^\$argon2/{print; exit}')"
+    if [[ -n "${hash}" ]]; then
+      echo "${hash}"
+      return 0
+    fi
+  fi
+
   k delete job "${job}" -n authelia --ignore-not-found --wait=false 2>/dev/null || true
-  k create job "${job}" -n authelia \
-    --image=docker.io/authelia/authelia:4.38.5 \
-    --restart=Never \
-    --command -- authelia crypto hash generate argon2 --password "${password}" --no-confirm
-  k wait --for=condition=complete "job/${job}" -n authelia --timeout=180s
+  k delete secret "${secret}" -n authelia --ignore-not-found 2>/dev/null || true
+  k create secret generic "${secret}" -n authelia --from-literal=password="${password}"
+
+  cat > "${tmp_job}" <<EOF
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${job}
+  namespace: authelia
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 120
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: hash
+          image: docker.io/authelia/authelia:4.38.5
+          env:
+            - name: AUTHELIA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${secret}
+                  key: password
+          command:
+            - /bin/sh
+            - -ec
+            - 'authelia crypto hash generate argon2 --password "$AUTHELIA_PASSWORD" --no-confirm'
+EOF
+
+  k apply -f "${tmp_job}"
+  if ! k wait --for=condition=complete "job/${job}" -n authelia --timeout=180s 2>/dev/null; then
+    warn "Authelia hash job failed — pod logs:"
+    k logs "job/${job}" -n authelia 2>/dev/null || true
+    k delete job "${job}" -n authelia --ignore-not-found --wait=false
+    k delete secret "${secret}" -n authelia --ignore-not-found
+    rm -f "${tmp_job}"
+    return 1
+  fi
+
   hash="$(k logs "job/${job}" -n authelia 2>/dev/null | awk '/^\$argon2/{print; exit}')"
   k delete job "${job}" -n authelia --ignore-not-found --wait=false
+  k delete secret "${secret}" -n authelia --ignore-not-found
+  rm -f "${tmp_job}"
   [[ -n "${hash}" ]] || return 1
   echo "${hash}"
 }
