@@ -12,6 +12,7 @@ ingressRoute:
     entryPoints:
       - websecure
 @TRAEFIK_DASHBOARD_TLS@
+@TRAEFIK_DASHBOARD_MIDDLEWARES@
 
 gateway:
   enabled: false

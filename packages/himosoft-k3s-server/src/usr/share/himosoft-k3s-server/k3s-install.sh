@@ -12,6 +12,7 @@ K3S_VERSION="${K3S_VERSION:-}"
 ARGOCD_FQDN="${ARGOCD_FQDN:-}"
 DASH_FQDN="${DASH_FQDN:-}"
 TRAEFIK_FQDN="${TRAEFIK_FQDN:-}"
+AUTH_FQDN="${AUTH_FQDN:-}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Must run as root."
@@ -32,6 +33,7 @@ fi
 TLS_SANS=(
   "${DOMAIN}"
   "${PUBLIC_IP}"
+  "${AUTH_FQDN}"
   "${ARGOCD_FQDN}"
   "${DASH_FQDN}"
   "${TRAEFIK_FQDN}"

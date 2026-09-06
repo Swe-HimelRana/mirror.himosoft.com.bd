@@ -1,0 +1,53 @@
+---
+theme: dark
+
+server:
+  address: 'tcp://:9091'
+
+log:
+  level: info
+
+totp:
+  disable: true
+  issuer: '@DOMAIN@'
+
+authentication_backend:
+  file:
+    path: /config/users_database.yml
+    password:
+      algorithm: argon2
+
+access_control:
+  default_policy: deny
+  rules:
+    - domain: '@AUTH_FQDN@'
+      policy: bypass
+    - domain:
+@PROTECTED_DOMAINS_YAML@
+      policy: one_factor
+
+session:
+  name: authelia_session
+  same_site: lax
+  expiration: 1h
+  inactivity: 5m
+  cookies:
+    - domain: '@DOMAIN@'
+      authelia_url: 'https://@AUTH_FQDN@'
+      default_redirection_url: 'https://@AUTH_FQDN@/'
+  redis:
+    host: authelia-redis.authelia.svc.cluster.local
+    port: 6379
+
+regulation:
+  max_retries: 3
+  find_time: 2m
+  ban_time: 5m
+
+storage:
+  local:
+    path: /data/db.sqlite3
+
+notifier:
+  filesystem:
+    filename: /data/notification.txt

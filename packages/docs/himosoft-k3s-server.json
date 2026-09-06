@@ -1,59 +1,59 @@
 {
-  "overview": "Full K3s cluster bootstrap for Server A: installs K3s, Traefik ingress, Kubernetes Dashboard, and optionally Argo CD. Configures HTTPS ingress at acd.*, dash.*, and traefik.* on your domain. Auto-detects public IP, verifies DNS before Let's Encrypt, and skips SSL until DNS is ready.",
+  "overview": "Full K3s cluster bootstrap for Server A: K3s, Traefik, optional Authelia SSO, optional Argo CD, and Kubernetes Dashboard. HTTPS at auth.*, acd.*, dash.*, and traefik.*. Authelia ForwardAuth protects all admin web UIs in production.",
   "prerequisites": [
     "Fresh Debian/Ubuntu server (root or sudo)",
     "Domain name (e.g. srv1.example.com) with DNS you control",
     "Ports 80 and 443 open to the internet for HTTPS",
-    "Port 6443 restricted to your admin IP (use himosoft-firewall)"
+    "Port 6443 restricted to your admin IP (use himosoft-firewall)",
+    "DNS A record for auth.* if using Authelia (default auth.your-domain)"
   ],
   "steps": [
     {
       "title": "Add the mirror",
-      "body": "Run once per server if the mirror is not already configured.",
       "command": "curl -fsSL https://mirror.himosoft.com.bd/install-mirror.sh | sudo bash"
     },
     {
       "title": "Install the package",
-      "body": "Installs the CLI and bootstrap scripts.",
       "command": "sudo apt update && sudo apt install himosoft-k3s-server"
     },
     {
       "title": "Run interactive setup",
-      "body": "Prompts for public IP, base domain, hostnames, Let's Encrypt email, and optional Argo CD. Installs K3s, Traefik, dashboards, and ingress.",
+      "body": "Prompts for public IP, domain, Authelia admin user/password (with confirmation), account email label (not sent anywhere), hostnames, Let's Encrypt email, and optional Argo CD. Login is password-only — no SMTP or TOTP setup needed.",
       "command": "sudo himosoft-k3s-server install"
     },
     {
       "title": "Point DNS",
-      "body": "Create A records for acd.*, dash.*, and traefik.* pointing to your server's public IP.",
-      "command": "# Example:\n# acd.srv1.example.com     -> YOUR_PUBLIC_IP\n# dash.srv1.example.com    -> YOUR_PUBLIC_IP\n# traefik.srv1.example.com -> YOUR_PUBLIC_IP"
+      "body": "A records to your public IP: auth.*, acd.*, dash.*, traefik.*",
+      "command": "# auth.srv1.example.com -> YOUR_PUBLIC_IP\n# acd.srv1.example.com   -> YOUR_PUBLIC_IP\n# dash.srv1.example.com  -> YOUR_PUBLIC_IP\n# traefik.srv1.example.com -> YOUR_PUBLIC_IP"
+    },
+    {
+      "title": "Login flow",
+      "body": "Open any protected URL → redirected to Authelia → login → access the UI. Argo CD and Dashboard still use their own credentials after Authelia."
     },
     {
       "title": "Enable Let's Encrypt (after DNS)",
-      "body": "Re-checks DNS and switches Traefik to real certificates when all hostnames resolve correctly.",
       "command": "sudo himosoft-k3s-server fix-ssl"
-    },
-    {
-      "title": "Get login credentials",
-      "body": "Shows Argo CD admin password and Kubernetes Dashboard token.",
-      "command": "sudo himosoft-k3s-server credentials"
     }
   ],
   "commands": [
-    { "command": "sudo himosoft-k3s-server install", "description": "Full interactive setup (K3s + platform)" },
-    { "command": "sudo himosoft-k3s-server bootstrap", "description": "Platform only — K3s must already be running" },
+    { "command": "sudo himosoft-k3s-server install", "description": "Full interactive setup (K3s + platform + Authelia)" },
+    { "command": "sudo himosoft-k3s-server bootstrap", "description": "Platform only — prompts for Authelia creds if missing" },
+    { "command": "sudo himosoft-k3s-server fix-auth", "description": "Re-apply Authelia middleware on all UIs" },
     { "command": "sudo himosoft-k3s-server fix-ingress", "description": "Fix Argo CD redirect loop behind Traefik" },
     { "command": "sudo himosoft-k3s-server fix-ssl", "description": "Verify DNS and enable Let's Encrypt" },
-    { "command": "sudo himosoft-k3s-server repair", "description": "Fix Argo CD in wrong namespace and re-bootstrap" },
-    { "command": "sudo himosoft-k3s-server status", "description": "Cluster health, URLs, and pod summary" },
-    { "command": "sudo himosoft-k3s-server credentials", "description": "Argo CD password and dashboard token" }
+    { "command": "sudo himosoft-k3s-server credentials", "description": "Authelia user, Argo CD password, dashboard token" },
+    { "command": "sudo himosoft-k3s-server status", "description": "Cluster health and pod summary" }
   ],
   "notes": [
-    "Config is saved to /etc/himosoft/k3s-server.conf (includes ACME_EMAIL)",
-    "Let's Encrypt email is prompted at install — default admin@your-domain",
-    "Argo CD install is optional — answer Y/n at the prompt",
-    "If Argo CD shows a blank page or redirect loop, run fix-ingress",
-    "Traefik is pre-installed — skip duplicate Traefik in GitOps Phase 2 or adopt the existing release",
-    "Verify cluster: k3s kubectl get pods -A"
+    "Login is password-only (one_factor) — no TOTP or mail server required",
+    "Authelia account email is metadata only; notifications use filesystem, not SMTP",
+    "Read Authelia codes: sudo k3s kubectl exec -n authelia deploy/authelia -- cat /data/notification.txt",
+    "Login portal: https://auth.your-domain (default auth.srv1.example.com)",
+    "Session cookie works across all subdomains of your base domain",
+    "Config: /etc/himosoft/k3s-server.conf",
+    "Authelia password: /etc/himosoft/authelia-admin.env (mode 600, not in k3s-server.conf)",
+    "Argo CD still requires its own admin password after Authelia login",
+    "Kubernetes Dashboard still requires token after Authelia login"
   ],
   "relatedPackages": ["himosoft-firewall", "himosoft-server-deps", "himosoft-kubeconfig", "himosoft-server-status"]
 }

@@ -1,0 +1,15 @@
+# Traefik ForwardAuth — Authelia protects Argo CD, Dashboard, and Traefik UI.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: authelia-forwardauth
+  namespace: authelia
+spec:
+  forwardAuth:
+    address: http://authelia.authelia.svc.cluster.local:9091/api/verify?rd=https://@AUTH_FQDN@/
+    trustForwardHeader: true
+    authResponseHeaders:
+      - Remote-User
+      - Remote-Groups
+      - Remote-Email
+      - Remote-Name

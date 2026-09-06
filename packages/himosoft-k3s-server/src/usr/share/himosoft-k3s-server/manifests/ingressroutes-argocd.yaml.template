@@ -11,6 +11,7 @@ spec:
       kind: Rule
       priority: 100
       middlewares:
+@AUTHELIA_MIDDLEWARES@
         - name: argocd-headers
           namespace: argocd
       services:

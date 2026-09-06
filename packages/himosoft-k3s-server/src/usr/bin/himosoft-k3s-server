@@ -16,6 +16,7 @@ Usage:
   himosoft-k3s-server bootstrap        Platform only (K3s must already run)
   himosoft-k3s-server fix-ssl          Re-check DNS and enable Let's Encrypt
   himosoft-k3s-server fix-ingress       Fix Argo CD redirect loop
+  himosoft-k3s-server fix-auth          Re-apply Authelia middleware on all UIs
   himosoft-k3s-server repair           Fix Argo CD wrong namespace + re-bootstrap
   himosoft-k3s-server status             Cluster, URLs, and pod summary
   himosoft-k3s-server credentials       Passwords and dashboard token
@@ -25,6 +26,7 @@ Features:
   - Auto-detects public IP (Enter to accept)
   - Verifies DNS before Let's Encrypt; skips SSL if DNS not ready
   - Prompts for Let's Encrypt notification email
+  - Optional Authelia SSO for Argo CD, Dashboard, and Traefik UI
   - Optional Argo CD install
   - Real HTTPS via Traefik + Let's Encrypt when DNS is configured
 
@@ -72,6 +74,10 @@ DASH_FQDN="${DASH_FQDN}"
 TRAEFIK_FQDN="${TRAEFIK_FQDN}"
 INSTALL_ARGOCD="${INSTALL_ARGOCD:-yes}"
 ACME_EMAIL="${ACME_EMAIL:-admin@${DOMAIN}}"
+INSTALL_AUTHELIA="${INSTALL_AUTHELIA:-yes}"
+AUTH_FQDN="${AUTH_FQDN:-}"
+AUTHELIA_ADMIN_USER="${AUTHELIA_ADMIN_USER:-}"
+AUTHELIA_ADMIN_EMAIL="${AUTHELIA_ADMIN_EMAIL:-}"
 EOF
   chmod 600 "${CONF}"
 }
@@ -98,6 +104,62 @@ detect_public_ip() {
   fi
 }
 
+save_authelia_admin_env() {
+  mkdir -p /etc/himosoft
+  printf 'AUTHELIA_ADMIN_PASSWORD=%q\n' "${AUTHELIA_ADMIN_PASSWORD}" > /etc/himosoft/authelia-admin.env
+  chmod 600 /etc/himosoft/authelia-admin.env
+}
+
+prompt_authelia_admin() {
+  hs_prompt_default AUTH_FQDN "Authelia login portal hostname" "auth.${DOMAIN}"
+  hs_prompt_default AUTHELIA_ADMIN_USER "Authelia admin username" "admin"
+  [[ -n "${AUTHELIA_ADMIN_USER}" ]] || { echo "Authelia username is required."; exit 1; }
+
+  local confirm=""
+  while true; do
+    hs_prompt_secret AUTHELIA_ADMIN_PASSWORD "Authelia admin password"
+    [[ -n "${AUTHELIA_ADMIN_PASSWORD}" ]] || { echo "Password is required."; continue; }
+    hs_prompt_secret confirm "Confirm Authelia admin password"
+    if [[ "${AUTHELIA_ADMIN_PASSWORD}" == "${confirm}" ]]; then
+      break
+    fi
+    echo "Passwords do not match — try again."
+  done
+
+  hs_prompt_default AUTHELIA_ADMIN_EMAIL "Authelia account email (label only — no mail server)" "admin@${DOMAIN}"
+  [[ -n "${AUTHELIA_ADMIN_EMAIL}" ]] || { echo "Authelia email is required."; exit 1; }
+  save_authelia_admin_env
+}
+
+# Prompt when Authelia is enabled but admin account was never configured.
+prompt_authelia_if_needed() {
+  INSTALL_AUTHELIA="${INSTALL_AUTHELIA:-yes}"
+  if [[ "${INSTALL_AUTHELIA}" != "yes" ]]; then
+    return 0
+  fi
+
+  local need=0
+  [[ -z "${AUTH_FQDN:-}" ]] && need=1
+  [[ -z "${AUTHELIA_ADMIN_USER:-}" ]] && need=1
+  [[ -z "${AUTHELIA_ADMIN_EMAIL:-}" ]] && need=1
+  [[ ! -f /etc/himosoft/authelia-admin.env ]] && need=1
+
+  if [[ "${need}" -eq 0 ]]; then
+    if [[ -z "${AUTHELIA_ADMIN_PASSWORD:-}" && -f /etc/himosoft/authelia-admin.env ]]; then
+      # shellcheck source=/dev/null
+      source /etc/himosoft/authelia-admin.env
+    fi
+    return 0
+  fi
+
+  echo ""
+  echo "Authelia admin account"
+  echo "──────────────────────"
+  echo "Create the login used to access Argo CD, Dashboard, and Traefik."
+  prompt_authelia_admin
+  save_conf
+}
+
 prompt_install_config() {
   local detected_ip
   detected_ip="$(detect_public_ip | tr -d '[:space:]')"
@@ -117,7 +179,22 @@ prompt_install_config() {
   hs_prompt_yes_no INSTALL_ARGOCD "Install Argo CD (GitOps UI)?" "yes"
 
   echo ""
-  echo "Step 3 — Service hostnames (FQDN for each web UI)"
+  echo "Step 3 — Authelia SSO (protect web UIs)"
+  echo "───────────────────────────────────────"
+  hs_prompt_yes_no INSTALL_AUTHELIA "Install Authelia login for Argo CD, Dashboard, and Traefik?" "yes"
+  if [[ "${INSTALL_AUTHELIA}" == "yes" ]]; then
+    echo ""
+    echo "Create your Authelia admin account (login for all protected web UIs):"
+    prompt_authelia_admin
+  else
+    AUTH_FQDN=""
+    AUTHELIA_ADMIN_USER=""
+    AUTHELIA_ADMIN_EMAIL=""
+    rm -f /etc/himosoft/authelia-admin.env
+  fi
+
+  echo ""
+  echo "Step 4 — Service hostnames (FQDN for each web UI)"
   echo "──────────────────────────────────────────────────"
   echo "Press Enter to accept the default shown in [brackets]."
   echo ""
@@ -130,14 +207,14 @@ prompt_install_config() {
   hs_prompt_default TRAEFIK_FQDN "Traefik dashboard hostname" "traefik.${DOMAIN}"
 
   echo ""
-  echo "Step 4 — Let's Encrypt"
+  echo "Step 5 — Let's Encrypt"
   echo "──────────────────────"
   echo "Used for Argo CD, Dashboard, and Traefik HTTPS certificates."
   hs_prompt_default ACME_EMAIL "Let's Encrypt email" "admin@${DOMAIN}"
   [[ -n "${ACME_EMAIL}" ]] || { echo "Email is required for Let's Encrypt."; exit 1; }
 
   echo ""
-  echo "Step 5 — K3s version (optional)"
+  echo "Step 6 — K3s version (optional)"
   echo "───────────────────────────────"
   hs_prompt_optional K3S_VERSION "K3s version (empty = latest from get.k3s.io)"
 
@@ -148,6 +225,12 @@ prompt_install_config() {
   echo "  Public IP              : ${PUBLIC_IP}"
   echo "  Base domain            : ${DOMAIN}"
   echo "  Install Argo CD        : ${INSTALL_ARGOCD}"
+  echo "  Authelia SSO           : ${INSTALL_AUTHELIA}"
+  if [[ "${INSTALL_AUTHELIA}" == "yes" ]]; then
+    echo "  Authelia portal        : https://${AUTH_FQDN}"
+    echo "  Authelia admin user    : ${AUTHELIA_ADMIN_USER}"
+    echo "  (password — as entered above, not stored in k3s-server.conf)"
+  fi
   echo "  Let's Encrypt email    : ${ACME_EMAIL}"
   echo ""
   if [[ "${INSTALL_ARGOCD}" == "yes" ]]; then
@@ -160,6 +243,9 @@ prompt_install_config() {
   echo "  SSL                    : Let's Encrypt if DNS points to ${PUBLIC_IP}"
   echo ""
   echo "  DNS — create A records → ${PUBLIC_IP}:"
+  if [[ "${INSTALL_AUTHELIA}" == "yes" ]]; then
+    echo "    ${AUTH_FQDN}"
+  fi
   if [[ "${INSTALL_ARGOCD}" == "yes" ]]; then
     echo "    ${ARGOCD_FQDN}"
   fi
@@ -171,7 +257,13 @@ prompt_install_config() {
 
 export_install_vars() {
   export PUBLIC_IP DOMAIN K3S_VERSION ARGOCD_FQDN DASH_FQDN TRAEFIK_FQDN
-  export INSTALL_ARGOCD ACME_EMAIL SHARE
+  export INSTALL_ARGOCD INSTALL_AUTHELIA AUTH_FQDN ACME_EMAIL SHARE
+  export AUTHELIA_ADMIN_USER AUTHELIA_ADMIN_EMAIL AUTHELIA_ADMIN_PASSWORD
+  if [[ -z "${AUTHELIA_ADMIN_PASSWORD:-}" && -f /etc/himosoft/authelia-admin.env ]]; then
+    # shellcheck source=/dev/null
+    source /etc/himosoft/authelia-admin.env
+    export AUTHELIA_ADMIN_PASSWORD
+  fi
 }
 
 cmd_install() {
@@ -192,6 +284,7 @@ cmd_bootstrap() {
   if [[ -f "${CONF}" ]]; then
     load_conf
     echo "Using saved config from ${CONF}"
+    prompt_authelia_if_needed
     hs_confirm "Re-run platform bootstrap?" || exit 0
   else
     prompt_install_config
@@ -240,6 +333,30 @@ cmd_fix_ssl() {
   [[ "${INSTALL_ARGOCD:-yes}" == "yes" && -n "${ARGOCD_FQDN:-}" ]] && configure_argocd_ingress
   echo ""
   echo "Let's Encrypt enabled. Wait 1–2 minutes, then open your URLs."
+}
+
+cmd_fix_auth() {
+  hs_require_root
+  require_share_files
+  load_conf 2>/dev/null || true
+  [[ -f "${CONF}" ]] || { echo "No config. Run install first."; exit 1; }
+  if [[ "${INSTALL_AUTHELIA:-yes}" != "yes" ]]; then
+    echo "Authelia is not enabled in ${CONF}"
+    exit 1
+  fi
+  prompt_authelia_if_needed
+  export_install_vars
+  # shellcheck source=/dev/null
+  source "${SHARE}/lib.sh"
+  hs_banner "Re-apply Authelia protection"
+  install_authelia
+  apply_dashboard_ingress
+  [[ "${INSTALL_ARGOCD:-yes}" == "yes" && -n "${ARGOCD_FQDN:-}" ]] && configure_argocd_ingress
+  echo ""
+  echo "Authelia login: https://${AUTH_FQDN}"
+  echo "Protected: acd / dash / traefik dashboards"
+  echo "Authelia codes (filesystem notifier, no SMTP):"
+  echo "  sudo k3s kubectl exec -n authelia deploy/authelia -- cat /data/notification.txt"
 }
 
 cmd_fix_ingress() {
@@ -297,6 +414,14 @@ cmd_credentials() {
   hs_require_root
   load_conf 2>/dev/null || true
   echo "=== Credentials ==="
+  if [[ "${INSTALL_AUTHELIA:-yes}" == "yes" && -n "${AUTH_FQDN:-}" ]]; then
+    echo "Authelia — https://${AUTH_FQDN}"
+    echo "  Username: ${AUTHELIA_ADMIN_USER:-admin}"
+    echo "  Use the password you set at install (password-only login; TOTP disabled)"
+    echo "  Authelia codes (filesystem notifier, no SMTP):"
+    echo "    sudo k3s kubectl exec -n authelia deploy/authelia -- cat /data/notification.txt"
+    echo ""
+  fi
   if [[ "${INSTALL_ARGOCD:-yes}" == "yes" ]] && \
      k3s kubectl get secret argocd-initial-admin-secret -n argocd >/dev/null 2>&1; then
     echo "Argo CD — https://${ARGOCD_FQDN:-acd.<domain>}"
@@ -320,6 +445,7 @@ main() {
     install|configure) cmd_install ;;
     bootstrap) cmd_bootstrap ;;
     fix-ssl) cmd_fix_ssl ;;
+    fix-auth) cmd_fix_auth ;;
     fix-ingress) cmd_fix_ingress ;;
     repair) cmd_repair ;;
     status) cmd_status ;;

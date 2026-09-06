@@ -21,6 +21,11 @@ fi
 INSTALL_ARGOCD="${INSTALL_ARGOCD:-yes}"
 ACME_EMAIL="${ACME_EMAIL:-admin@${DOMAIN}}"
 
+if [[ -f /etc/himosoft/authelia-admin.env ]]; then
+  # shellcheck source=/dev/null
+  source /etc/himosoft/authelia-admin.env
+fi
+
 ARGOCD_MANIFEST="https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"
 DASHBOARD_MANIFEST="https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml"
 TRAEFIK_CHART_VERSION="${TRAEFIK_CHART_VERSION:-}"
@@ -147,6 +152,21 @@ print_summary() {
 ╚══════════════════════════════════════════════════════════════╝
 
 SSL: ${ssl_note}
+EOF
+
+  if [[ "${INSTALL_AUTHELIA:-yes}" == "yes" && -n "${AUTH_FQDN:-}" ]]; then
+    cat <<EOF
+
+Authelia SSO: https://${AUTH_FQDN}
+  Login required before Argo CD, Dashboard, and Traefik UI
+  User: ${AUTHELIA_ADMIN_USER:-admin}
+  Password: the one you entered at install (password-only — no TOTP or email required)
+  Authelia codes (filesystem notifier, no SMTP):
+    sudo k3s kubectl exec -n authelia deploy/authelia -- cat /data/notification.txt
+EOF
+  fi
+
+  cat <<EOF
 
 URLs:
   Kubernetes Dashboard https://${DASH_FQDN}
@@ -162,6 +182,13 @@ EOF
   cat <<EOF
 
 DNS — A records must point to ${PUBLIC_IP}:
+EOF
+
+  if [[ "${INSTALL_AUTHELIA:-yes}" == "yes" && -n "${AUTH_FQDN:-}" ]]; then
+    echo "  ${AUTH_FQDN}"
+  fi
+
+  cat <<EOF
   ${TRAEFIK_FQDN}
   ${DASH_FQDN}
 EOF
@@ -200,6 +227,7 @@ EOF
 }
 
 install_traefik
+install_authelia
 install_argocd
 install_k8s_dashboard
 install_ingressroutes

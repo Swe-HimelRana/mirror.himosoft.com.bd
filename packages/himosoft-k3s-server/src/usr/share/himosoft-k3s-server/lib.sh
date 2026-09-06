@@ -142,8 +142,120 @@ apply_template() {
     -e "s|@ARGOCD_FQDN@|${ARGOCD_FQDN}|g" \
     -e "s|@DASH_FQDN@|${DASH_FQDN}|g" \
     -e "s|@TRAEFIK_FQDN@|${TRAEFIK_FQDN}|g" \
+    -e "s|@AUTH_FQDN@|${AUTH_FQDN:-}|g" \
+    -e "s|@DOMAIN@|${DOMAIN}|g" \
     -e "s|@ACME_EMAIL@|${ACME_EMAIL:-admin@${DOMAIN}}|g" \
     "${template}"
+}
+
+authelia_enabled() {
+  [[ "${INSTALL_AUTHELIA:-yes}" == "yes" && -n "${AUTH_FQDN:-}" ]]
+}
+
+render_authelia_middleware_argocd() {
+  if authelia_enabled; then
+    cat <<'EOF'
+        - name: authelia-forwardauth
+          namespace: authelia
+EOF
+  fi
+}
+
+render_authelia_middleware_dashboard_block() {
+  if authelia_enabled; then
+    cat <<'EOF'
+      middlewares:
+        - name: authelia-forwardauth
+          namespace: authelia
+EOF
+  fi
+}
+
+render_traefik_dashboard_middlewares() {
+  if authelia_enabled; then
+    cat <<'EOF'
+    middlewares:
+      - name: authelia-forwardauth
+        namespace: authelia
+EOF
+  fi
+}
+
+build_protected_domains_yaml() {
+  local -a domains=()
+  if [[ "${INSTALL_ARGOCD:-yes}" == "yes" && -n "${ARGOCD_FQDN:-}" ]]; then
+    domains+=("${ARGOCD_FQDN}")
+  fi
+  domains+=("${DASH_FQDN}" "${TRAEFIK_FQDN}")
+  local d
+  for d in "${domains[@]}"; do
+    echo "        - '${d}'"
+  done
+}
+
+generate_authelia_password_hash() {
+  local password="$1" job="authelia-hash-$$" hash=""
+  k delete job "${job}" -n authelia --ignore-not-found --wait=false 2>/dev/null || true
+  k create job "${job}" -n authelia \
+    --image=docker.io/authelia/authelia:4.38.5 \
+    --restart=Never \
+    --command -- authelia crypto hash generate argon2 --password "${password}" --no-confirm
+  k wait --for=condition=complete "job/${job}" -n authelia --timeout=180s
+  hash="$(k logs "job/${job}" -n authelia 2>/dev/null | awk '/^\$argon2/{print; exit}')"
+  k delete job "${job}" -n authelia --ignore-not-found --wait=false
+  [[ -n "${hash}" ]] || return 1
+  echo "${hash}"
+}
+
+sync_authelia_users_secret() {
+  : "${AUTHELIA_ADMIN_USER:?AUTHELIA_ADMIN_USER not set}"
+  : "${AUTHELIA_ADMIN_PASSWORD:?AUTHELIA_ADMIN_PASSWORD not set}"
+  : "${AUTHELIA_ADMIN_EMAIL:?AUTHELIA_ADMIN_EMAIL not set}"
+
+  local hash tmp_users="/tmp/authelia-users-$$.yml"
+  log "Updating Authelia admin user..."
+  hash="$(generate_authelia_password_hash "${AUTHELIA_ADMIN_PASSWORD}")" || {
+    echo "Failed to hash Authelia password." >&2
+    return 1
+  }
+
+  cat > "${tmp_users}" <<EOF
+users:
+  ${AUTHELIA_ADMIN_USER}:
+    disabled: false
+    displayname: "${AUTHELIA_ADMIN_DISPLAY_NAME:-Admin}"
+    password: "${hash}"
+    email: ${AUTHELIA_ADMIN_EMAIL}
+    groups:
+      - admins
+EOF
+
+  k create secret generic authelia-users -n authelia \
+    --from-file=users_database.yml="${tmp_users}" \
+    --dry-run=client -o yaml | k apply -f -
+  rm -f "${tmp_users}"
+}
+
+apply_template_ingress() {
+  local template="$1" fqdn="$2"
+  local tls_block line
+  tls_block="$(render_tls_block "${fqdn}")"
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" == *"@TLS_BLOCK@"* ]]; then
+      echo "${tls_block}"
+    elif [[ "${line}" == *"@AUTHELIA_MIDDLEWARES@"* ]]; then
+      render_authelia_middleware_argocd
+    elif [[ "${line}" == *"@AUTHELIA_MIDDLEWARES_BLOCK@"* ]]; then
+      render_authelia_middleware_dashboard_block
+    else
+      echo "${line}"
+    fi
+  done < <(apply_template "${template}")
+}
+
+apply_template_with_tls() {
+  local template="$1" fqdn="$2"
+  apply_template_ingress "${template}" "${fqdn}"
 }
 
 detect_public_ip() {
@@ -177,24 +289,14 @@ EOF
   fi
 }
 
-apply_template_with_tls() {
-  local template="$1" fqdn="$2"
-  local tls_block line
-  tls_block="$(render_tls_block "${fqdn}")"
-  while IFS= read -r line || [[ -n "${line}" ]]; do
-    if [[ "${line}" == *"@TLS_BLOCK@"* ]]; then
-      echo "${tls_block}"
-    else
-      echo "${line}"
-    fi
-  done < <(apply_template "${template}")
-}
-
 check_dns_for_ssl() {
   local fqdn all_ok=1
   local -a fqdns=("${TRAEFIK_FQDN}" "${DASH_FQDN}")
   if [[ "${INSTALL_ARGOCD:-yes}" == "yes" && -n "${ARGOCD_FQDN:-}" ]]; then
     fqdns+=("${ARGOCD_FQDN}")
+  fi
+  if authelia_enabled; then
+    fqdns+=("${AUTH_FQDN}")
   fi
 
   log "Checking DNS before Let's Encrypt..."
@@ -231,6 +333,8 @@ write_traefik_values() {
       if [[ -n "${tls_block}" ]]; then
         printf '%b\n' "${tls_block}"
       fi
+    elif [[ "${line}" == *"@TRAEFIK_DASHBOARD_MIDDLEWARES@"* ]]; then
+      render_traefik_dashboard_middlewares
     else
       echo "${line}"
     fi
@@ -311,5 +415,81 @@ EOF
 
 apply_dashboard_ingress() {
   local share="${SHARE:-/usr/share/himosoft-k3s-server}"
-  apply_template_with_tls "${share}/manifests/ingressroutes-dashboard.yaml.template" "${DASH_FQDN}" | k apply -f -
+  apply_template_ingress "${share}/manifests/ingressroutes-dashboard.yaml.template" "${DASH_FQDN}" | k apply -f -
+}
+
+upgrade_traefik_dashboard_auth() {
+  if ! authelia_enabled; then
+    return 0
+  fi
+  if ! helm status traefik -n traefik >/dev/null 2>&1; then
+    return 0
+  fi
+  log "Applying Authelia middleware to Traefik dashboard route"
+  ensure_helm
+  write_traefik_values
+  helm upgrade traefik traefik/traefik -n traefik \
+    -f /etc/himosoft/traefik-values.yaml --wait --timeout 5m
+}
+
+install_authelia() {
+  if ! authelia_enabled; then
+    log "Skipping Authelia (not selected)"
+    return 0
+  fi
+
+  local share="${SHARE:-/usr/share/himosoft-k3s-server}"
+  : "${AUTH_FQDN:?AUTH_FQDN not set}"
+  : "${AUTHELIA_ADMIN_USER:?AUTHELIA_ADMIN_USER not set}"
+  : "${AUTHELIA_ADMIN_PASSWORD:?AUTHELIA_ADMIN_PASSWORD not set}"
+  : "${AUTHELIA_ADMIN_EMAIL:?AUTHELIA_ADMIN_EMAIL not set}"
+
+  if k get deployment authelia -n authelia >/dev/null 2>&1; then
+    log "Authelia already installed — syncing admin account and refreshing routes"
+    sync_authelia_users_secret
+    k rollout restart deployment/authelia -n authelia 2>/dev/null || true
+    wait_for_deployment authelia authelia 600
+    apply_template "${share}/manifests/authelia/middleware-forwardauth.yaml.template" | k apply -f -
+    apply_template_ingress "${share}/manifests/authelia/ingressroute.yaml.template" "${AUTH_FQDN}" | k apply -f -
+    upgrade_traefik_dashboard_auth
+    return 0
+  fi
+
+  log "Installing Authelia SSO (protects Argo CD, Dashboard, Traefik UI)"
+  k apply -f "${share}/manifests/authelia/namespace.yaml"
+  k apply -f "${share}/manifests/authelia/redis.yaml"
+  wait_for_deployment authelia authelia-redis 300
+
+  if ! k get secret authelia-secrets -n authelia >/dev/null 2>&1; then
+    k create secret generic authelia-secrets -n authelia \
+      --from-literal=jwt_secret="$(openssl rand -hex 32)" \
+      --from-literal=session_secret="$(openssl rand -hex 32)" \
+      --from-literal=storage_encryption_key="$(openssl rand -hex 32)"
+  fi
+
+  local protected tmp_cfg="/tmp/authelia-configuration-$$.yml"
+  log "Generating Authelia password hash..."
+  sync_authelia_users_secret
+
+  protected="$(build_protected_domains_yaml)"
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" == *"@PROTECTED_DOMAINS_YAML@"* ]]; then
+      echo "${protected}"
+    else
+      echo "${line}"
+    fi
+  done < <(apply_template "${share}/manifests/authelia/configuration.yml.template") > "${tmp_cfg}"
+
+  k create configmap authelia-config -n authelia \
+    --from-file=configuration.yml="${tmp_cfg}" \
+    --dry-run=client -o yaml | k apply -f -
+  rm -f "${tmp_cfg}"
+
+  k apply -f "${share}/manifests/authelia/deployment.yaml"
+  wait_for_deployment authelia authelia 600
+
+  apply_template "${share}/manifests/authelia/middleware-forwardauth.yaml.template" | k apply -f -
+  apply_template_ingress "${share}/manifests/authelia/ingressroute.yaml.template" "${AUTH_FQDN}" | k apply -f -
+  upgrade_traefik_dashboard_auth
+  log "Authelia ready — login portal: https://${AUTH_FQDN}"
 }

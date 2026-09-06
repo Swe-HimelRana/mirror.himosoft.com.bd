@@ -21,7 +21,7 @@
     {
       "name": "himosoft-k3s-server",
       "title": "K3s cluster bootstrap",
-      "description": "K3s bootstrap with Traefik, optional Argo CD, K8s Dashboard, Let's Encrypt if DNS ready.",
+      "description": "K3s bootstrap with Traefik, Authelia SSO, optional Argo CD, Dashboard, Let's Encrypt.",
       "status": "available",
       "architecture": "all",
       "depends": ["curl", "ca-certificates", "himosoft-common"],

@@ -17,6 +17,7 @@ spec:
   routes:
     - match: Host(`@DASH_FQDN@`)
       kind: Rule
+@AUTHELIA_MIDDLEWARES_BLOCK@
       services:
         - name: kubernetes-dashboard
           port: 443
