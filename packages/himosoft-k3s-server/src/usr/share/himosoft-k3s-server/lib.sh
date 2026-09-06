@@ -285,11 +285,11 @@ generate_authelia_password_hash() {
   k delete secret "${secret_name}" -n authelia --ignore-not-found 2>/dev/null || true
   k create secret generic "${secret_name}" -n authelia --from-literal=password="${password}"
 
-  cat > "${tmp_job}" <<EOF
+  cat > "${tmp_job}" <<'JOBTMPL'
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ${job_id}
+  name: @JOB_ID@
   namespace: authelia
 spec:
   backoffLimit: 0
@@ -304,13 +304,20 @@ spec:
             - name: AUTHELIA_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: ${secret_name}
+                  name: @SECRET_NAME@
                   key: password
           command:
             - /bin/sh
             - -ec
             - 'authelia crypto hash generate argon2 --password "$AUTHELIA_PASSWORD" --no-confirm'
-EOF
+JOBTMPL
+  sed -i "s/@JOB_ID@/${job_id}/g; s/@SECRET_NAME@/${secret_name}/g" "${tmp_job}"
+
+  if [[ ! -s "${tmp_job}" ]]; then
+    warn "Failed to write Authelia hash job manifest"
+    k delete secret "${secret_name}" -n authelia --ignore-not-found
+    return 1
+  fi
 
   k apply -f "${tmp_job}"
   if ! k wait --for=condition=complete "job/${job_id}" -n authelia --timeout=180s 2>/dev/null; then

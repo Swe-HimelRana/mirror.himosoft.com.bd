@@ -1,3 +1,10 @@
+himosoft-k3s-server (1.3.7) stable; urgency=medium
+
+  * Fix Authelia hash job manifest — quoted heredoc stops set -u expanding
+    $AUTHELIA_PASSWORD before the Kubernetes Job is applied
+
+ -- Himosoft <admin@himosoft.com.bd>  Sun, 07 Sep 2026 23:10:00 +0600
+
 himosoft-k3s-server (1.3.6) stable; urgency=medium
 
   * Fix Authelia hash crash: split local declarations (set -u + job= in same line)
