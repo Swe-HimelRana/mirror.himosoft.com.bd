@@ -14,9 +14,18 @@ log() {
   install_progress_after_output
 }
 
-# Apt-style overall install progress — fixed bar on the last terminal line.
+# Apt-style overall install progress — fixed bar on the last terminal line (stderr).
 install_progress_is_tty() {
-  [[ -t 1 ]] && [[ -n "${TERM:-}" ]] && command -v tput >/dev/null 2>&1
+  [[ -t 2 ]] && [[ -n "${TERM:-}" ]] && command -v tput >/dev/null 2>&1
+}
+
+install_progress_is_noop_install() {
+  [[ "${SKIP_K3S:-no}" == "yes" \
+    && "${SKIP_TRAEFIK:-no}" == "yes" \
+    && "${SKIP_AUTHELIA:-no}" == "yes" \
+    && "${SKIP_ARGOCD:-no}" == "yes" \
+    && "${SKIP_DASHBOARD:-no}" == "yes" \
+    && "${SKIP_INGRESS:-no}" == "yes" ]]
 }
 
 install_progress_reset() {
@@ -41,34 +50,48 @@ install_progress_recalc() {
 }
 
 install_progress_redraw() {
-  [[ "${INSTALL_PROGRESS_ACTIVE:-}" == yes ]] || return 0
+  [[ "${INSTALL_PROGRESS_ACTIVE:-}" == "yes" ]] || return 0
   if ! install_progress_is_tty; then
     return 0
   fi
   local pct="${INSTALL_PROGRESS_PCT:-0}" label="${INSTALL_PROGRESS_LABEL:-Installing}"
-  local width=46 filled empty bar="" rows i
+  local width=40 filled empty bar="" rows cols line pad i
   (( pct > 100 )) && pct=100
   filled=$(( pct * width / 100 ))
   empty=$(( width - filled ))
   for ((i = 0; i < filled; i++)); do bar+='#'; done
-  for ((i = 0; i < empty; i++)); do bar+='.'; done
+  for ((i = 0; i < empty; i++)); do bar+='-'; done
+  line="$(printf 'Progress: [%3d%%] [%s] %s' "${pct}" "${bar}" "${label}")"
   rows=$(tput lines)
-  tput sc 2>/dev/null || true
-  tput cup $(( rows - 1 )) 0 2>/dev/null || true
-  tput el 2>/dev/null || true
-  printf 'Progress: [%3d%%] [%s] %s' "${pct}" "${bar}" "${label}"
-  tput rc 2>/dev/null || true
+  cols=$(tput cols 2>/dev/null || echo 80)
+  pad=$(( cols - ${#line} ))
+  (( pad < 0 )) && pad=0
+  {
+    tput sc
+    tput cup $(( rows - 1 )) 0
+    tput el
+    printf '%s' "${line}"
+    printf '%*s' "${pad}" ''
+    tput rc
+  } >&2 2>/dev/null || printf '\r%-*s' "${cols}" "${line}" >&2
 }
 
-install_progress_before_output() {
-  [[ "${INSTALL_PROGRESS_ACTIVE:-}" == yes ]] || return 0
+install_progress_clear_line() {
   if ! install_progress_is_tty; then
     return 0
   fi
-  local rows
+  local rows cols
   rows=$(tput lines)
-  tput cup $(( rows - 1 )) 0 2>/dev/null || true
-  tput el 2>/dev/null || true
+  cols=$(tput cols 2>/dev/null || echo 80)
+  {
+    tput cup $(( rows - 1 )) 0
+    tput el
+  } >&2 2>/dev/null || printf '\r%-*s\r' "${cols}" '' >&2
+}
+
+install_progress_before_output() {
+  [[ "${INSTALL_PROGRESS_ACTIVE:-}" == "yes" ]] || return 0
+  install_progress_clear_line
 }
 
 install_progress_after_output() {
@@ -79,34 +102,41 @@ install_progress_start() {
   install_progress_reset
   INSTALL_PROGRESS_ACTIVE=yes
   export INSTALL_PROGRESS_ACTIVE
-  if install_progress_is_tty; then
-    printf '\n' >&2
-  fi
+  trap 'install_progress_finish' EXIT INT TERM
   install_progress_redraw
 }
 
 install_progress_finish() {
-  if [[ "${INSTALL_PROGRESS_ACTIVE:-}" == yes ]] && install_progress_is_tty; then
-    local rows
+  [[ "${INSTALL_PROGRESS_ACTIVE:-}" == "yes" ]] || return 0
+  trap - EXIT INT TERM
+  if install_progress_is_tty; then
+    local bar="" i rows
+    for ((i = 0; i < 40; i++)); do bar+='#'; done
     rows=$(tput lines)
-    tput cup $(( rows - 1 )) 0 2>/dev/null || true
-    tput el 2>/dev/null || true
-    printf 'Progress: [100%%] [%s] Complete\n' "$(printf '%*s' 46 '' | tr ' ' '#')"
+    {
+      tput cup $(( rows - 1 )) 0
+      tput el
+      printf 'Progress: [100%%] [%s] Complete\n' "${bar}"
+    } >&2 2>/dev/null || printf '\nProgress: [100%%] Complete\n' >&2
   fi
   INSTALL_PROGRESS_ACTIVE=no
   export INSTALL_PROGRESS_ACTIVE
 }
 
 install_progress_step_begin() {
+  local weight="${2:-0}"
+  (( weight == 0 )) && return 0
   INSTALL_PROGRESS_LABEL="${1:-Installing}"
-  INSTALL_PROGRESS_CURRENT_WEIGHT="${2:-5}"
+  INSTALL_PROGRESS_CURRENT_WEIGHT="${weight}"
   INSTALL_PROGRESS_SUB_PCT=0
   install_progress_recalc
   install_progress_redraw
 }
 
 install_progress_step_end() {
-  INSTALL_PROGRESS_DONE_WEIGHT=$(( INSTALL_PROGRESS_DONE_WEIGHT + INSTALL_PROGRESS_CURRENT_WEIGHT ))
+  local weight="${INSTALL_PROGRESS_CURRENT_WEIGHT:-0}"
+  (( weight == 0 )) && return 0
+  INSTALL_PROGRESS_DONE_WEIGHT=$(( INSTALL_PROGRESS_DONE_WEIGHT + weight ))
   INSTALL_PROGRESS_SUB_PCT=100
   install_progress_recalc
   export INSTALL_PROGRESS_DONE_WEIGHT
@@ -114,6 +144,7 @@ install_progress_step_end() {
 }
 
 install_progress_sub() {
+  (( INSTALL_PROGRESS_CURRENT_WEIGHT == 0 )) && return 0
   local sub_pct="${1:-0}" sub_label="${2:-}"
   (( sub_pct > 100 )) && sub_pct=100
   [[ -n "${sub_label}" ]] && INSTALL_PROGRESS_LABEL="${sub_label}"
@@ -122,8 +153,26 @@ install_progress_sub() {
   install_progress_redraw
 }
 
+install_progress_run_step() {
+  local label="$1" weight="$2"
+  shift 2
+  if [[ "${INSTALL_PROGRESS_ACTIVE:-}" != "yes" ]]; then
+    "$@"
+    return 0
+  fi
+  install_progress_step_begin "${label}" "${weight}"
+  "$@"
+  install_progress_step_end
+}
+
 # Build step weights from install plan (respects SKIP_* / feature flags).
 install_progress_init_from_env() {
+  if install_progress_is_noop_install; then
+    INSTALL_PROGRESS_ACTIVE=no
+    export INSTALL_PROGRESS_ACTIVE
+    return 0
+  fi
+
   local done="${INSTALL_PROGRESS_DONE_WEIGHT:-0}" total=0
   local w_k3s=0 w_coredns=2 w_traefik=0 w_certmgr=0 w_tls=0 w_authelia=0 w_argocd=0 w_dashboard=0 w_ingress=0 w_finish=3
 
@@ -163,6 +212,7 @@ install_progress_init_from_env() {
     install_progress_start
     INSTALL_PROGRESS_DONE_WEIGHT=${done}
     install_progress_recalc
+    install_progress_redraw
   else
     install_progress_recalc
     install_progress_redraw

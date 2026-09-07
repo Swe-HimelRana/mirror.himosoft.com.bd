@@ -1,3 +1,11 @@
+himosoft-k3s-server (1.5.3) stable; urgency=medium
+
+  * Fix progress bar leaving garbled text on shell prompt when all steps skip
+  * No progress bar on noop re-runs; EXIT trap cleans up terminal on finish
+  * Progress renders on stderr with apt-style bar (hash + dash)
+
+ -- Himosoft <admin@himosoft.com.bd>  Tue, 09 Sep 2026 01:00:00 +0600
+
 himosoft-k3s-server (1.5.2) stable; urgency=medium
 
   * Apt-style install progress bar — percentage fixed at bottom of terminal
