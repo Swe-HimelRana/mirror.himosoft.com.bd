@@ -11,16 +11,11 @@ usage() {
 Himosoft K3s Server — interactive K3s + platform bootstrap
 
 Usage:
-  himosoft-k3s-server                 Same as install (interactive setup)
+  himosoft-k3s-server help             Show this help
   himosoft-k3s-server install          K3s + Traefik + dashboards (+ optional Argo CD)
   himosoft-k3s-server bootstrap        Platform only (K3s must already run)
-  himosoft-k3s-server fix-ssl          Re-check DNS and enable Let's Encrypt
-  himosoft-k3s-server fix-ingress       Fix Argo CD redirect loop
-  himosoft-k3s-server fix-auth          Re-apply Authelia middleware on all UIs
-  himosoft-k3s-server repair           Fix Argo CD wrong namespace + re-bootstrap
-  himosoft-k3s-server status             Cluster, URLs, and pod summary
-  himosoft-k3s-server credentials       Passwords and dashboard token
-  himosoft-k3s-server help
+  himosoft-k3s-server status           Cluster, URLs, and pod summary
+  himosoft-k3s-server credentials      Passwords and dashboard token
 
 Features:
   - Auto-detects public IP (Enter to accept)
@@ -29,6 +24,7 @@ Features:
   - Optional Authelia SSO for Argo CD, Dashboard, and Traefik UI
   - Optional Argo CD install
   - Real HTTPS via Traefik + Let's Encrypt when DNS is configured
+  - Re-run install or bootstrap skips components already installed
 
 Config: /etc/himosoft/k3s-server.conf
 EOF
@@ -342,7 +338,7 @@ plan_action_label() {
   elif [[ "${state}" == "ready" ]]; then
     echo "reconfigure"
   elif [[ "${state}" == "installed" ]]; then
-    echo "continue / repair"
+    echo "continue / finish"
   else
     echo "install"
   fi
@@ -562,93 +558,6 @@ cmd_bootstrap() {
   exec "${SHARE}/platform-bootstrap.sh"
 }
 
-cmd_fix_ssl() {
-  hs_require_root
-  require_share_files
-  load_conf 2>/dev/null || true
-  [[ -f "${CONF}" ]] || { echo "No config. Run install first."; exit 1; }
-  hs_banner "Enable Let's Encrypt SSL"
-  if [[ -z "${ACME_EMAIL:-}" ]]; then
-    hs_prompt_default ACME_EMAIL "Let's Encrypt email" "admin@${DOMAIN:-example.com}"
-    [[ -n "${ACME_EMAIL}" ]] || { echo "Email is required."; exit 1; }
-    save_conf
-  fi
-  export_install_vars
-  # shellcheck source=/dev/null
-  source "${SHARE}/lib.sh"
-  check_dns_for_ssl
-  if [[ "${ENABLE_LETSENCRYPT:-no}" != "yes" ]]; then
-    echo ""
-    echo "DNS is not ready. Point these A records to ${PUBLIC_IP}:"
-    echo "  ${TRAEFIK_FQDN}"
-    echo "  ${DASH_FQDN}"
-    [[ "${INSTALL_ARGOCD:-yes}" == "yes" && -n "${ARGOCD_FQDN:-}" ]] && echo "  ${ARGOCD_FQDN}"
-    exit 1
-  fi
-  ensure_helm
-  helm repo add traefik https://traefik.github.io/charts >/dev/null 2>&1 || true
-  helm repo update traefik
-  write_traefik_values
-  helm upgrade --install traefik traefik/traefik -n traefik \
-    -f /etc/himosoft/traefik-values.yaml --wait --timeout 10m
-  wait_for_deployment traefik traefik 300
-  apply_dashboard_ingress
-  [[ "${INSTALL_ARGOCD:-yes}" == "yes" && -n "${ARGOCD_FQDN:-}" ]] && configure_argocd_ingress
-  echo ""
-  echo "Let's Encrypt enabled. Wait 1–2 minutes, then open your URLs."
-}
-
-cmd_fix_auth() {
-  hs_require_root
-  require_share_files
-  load_conf 2>/dev/null || true
-  [[ -f "${CONF}" ]] || { echo "No config. Run install first."; exit 1; }
-  if [[ "${INSTALL_AUTHELIA:-yes}" != "yes" ]]; then
-    echo "Authelia is not enabled in ${CONF}"
-    exit 1
-  fi
-  prompt_authelia_if_needed
-  export_install_vars
-  # shellcheck source=/dev/null
-  source "${SHARE}/lib.sh"
-  hs_banner "Re-apply Authelia protection"
-  install_authelia
-  apply_dashboard_ingress
-  [[ "${INSTALL_ARGOCD:-yes}" == "yes" && -n "${ARGOCD_FQDN:-}" ]] && configure_argocd_ingress
-  echo ""
-  echo "Authelia login: https://${AUTH_FQDN}"
-  echo "Protected: acd / dash / traefik dashboards"
-  echo "Authelia codes (filesystem notifier, no SMTP):"
-  echo "  sudo k3s kubectl exec -n authelia deploy/authelia -- cat /data/notification.txt"
-}
-
-cmd_fix_ingress() {
-  hs_require_root
-  require_share_files
-  load_conf 2>/dev/null || true
-  [[ -f "${CONF}" ]] || { echo "No config. Run install first."; exit 1; }
-  hs_banner "Fix Argo CD ingress"
-  export_install_vars
-  # shellcheck source=/dev/null
-  source "${SHARE}/lib.sh"
-  configure_argocd_ingress
-  echo ""
-  echo "Done. Open: https://${ARGOCD_FQDN}"
-  echo "Clear browser cache/cookies if needed."
-}
-
-cmd_repair() {
-  hs_require_root
-  require_share_files
-  load_conf 2>/dev/null || true
-  [[ -f "${CONF}" ]] || { echo "No config."; exit 1; }
-  export_install_vars
-  # shellcheck source=/dev/null
-  source "${SHARE}/lib.sh"
-  cleanup_argocd_from_default
-  exec "${SHARE}/platform-bootstrap.sh"
-}
-
 cmd_status() {
   load_conf 2>/dev/null || true
   echo "=== Himosoft K3s Server ==="
@@ -704,27 +613,19 @@ cmd_credentials() {
 }
 
 main() {
-  case "${1:-install}" in
+  if [[ $# -eq 0 ]]; then
+    usage
+    exit 0
+  fi
+
+  case "$1" in
     install|configure) cmd_install ;;
     bootstrap) cmd_bootstrap ;;
-    fix-ssl) cmd_fix_ssl ;;
-    fix-auth) cmd_fix_auth ;;
-    fix-ingress) cmd_fix_ingress ;;
-    repair) cmd_repair ;;
     status) cmd_status ;;
     credentials) cmd_credentials ;;
     help|-h|--help) usage ;;
-    *) usage; exit 1 ;;
+    *) echo "Unknown command: $1" >&2; echo "" >&2; usage; exit 1 ;;
   esac
 }
-
-if [[ $# -eq 0 ]] && [[ "${EUID}" -ne 0 ]]; then
-  usage; echo ""; echo "Run: sudo himosoft-k3s-server install"; exit 0
-fi
-
-if [[ $# -eq 0 ]] && [[ "${EUID}" -eq 0 ]]; then
-  echo "Starting interactive K3s setup..."
-  echo ""
-fi
 
 main "$@"

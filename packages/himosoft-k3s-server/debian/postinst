@@ -11,37 +11,16 @@ case "$1" in
     echo ""
     echo "Package installed — cluster NOT set up yet."
     echo ""
-    echo "Run the interactive installer (prompts for IP, domain, hostnames):"
+    echo "When ready, run the interactive installer:"
     echo ""
     echo "  sudo himosoft-k3s-server install"
-    echo "  sudo himosoft-k3s-server          # same as install"
     echo ""
-    echo "You will be asked for:"
-    echo "  • Server public IP"
-    echo "  • Base domain (e.g. srv1.himosoft.com.bd)"
-    echo "  • Argo CD hostname         (default: acd.<domain>)"
-    echo "  • Kubernetes Dashboard     (default: dash.<domain>)"
-    echo "  • Traefik dashboard        (default: traefik.<domain>)"
+    echo "Other commands:"
+    echo "  sudo himosoft-k3s-server help          — usage and options"
+    echo "  sudo himosoft-k3s-server bootstrap     — platform only (K3s must run)"
+    echo "  sudo himosoft-k3s-server status        — cluster health"
+    echo "  sudo himosoft-k3s-server credentials   — passwords and tokens"
     echo ""
-    echo "After setup, access:"
-    echo "  https://acd.<your-domain>              — Argo CD"
-    echo "  https://dash.<your-domain>             — Kubernetes Dashboard"
-    echo "  https://traefik.<your-domain>/dashboard/ — Traefik"
-    echo ""
-    echo "  sudo himosoft-k3s-server credentials   — passwords & tokens"
-    echo "  sudo himosoft-k3s-server status         — check cluster"
-    echo ""
-
-    if [ ! -f /etc/himosoft/k3s-server.conf ] && [ -t 0 ] && [ -t 1 ]; then
-      printf "Run interactive setup now? [y/N]: "
-      read -r reply
-      case "$reply" in
-        y|Y|yes|Yes|YES)
-          echo ""
-          himosoft-k3s-server install
-          ;;
-      esac
-    fi
     ;;
 esac
 

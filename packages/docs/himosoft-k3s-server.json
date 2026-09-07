@@ -27,24 +27,25 @@
       "command": "# auth.srv1.example.com -> YOUR_PUBLIC_IP\n# acd.srv1.example.com   -> YOUR_PUBLIC_IP\n# dash.srv1.example.com  -> YOUR_PUBLIC_IP\n# traefik.srv1.example.com -> YOUR_PUBLIC_IP"
     },
     {
-      "title": "Login flow",
-      "body": "Open any protected URL → redirected to Authelia → login → access the UI. Argo CD and Dashboard still use their own credentials after Authelia."
+      "title": "Enable Let's Encrypt (after DNS)",
+      "body": "Re-run bootstrap — it detects DNS and upgrades Traefik to Let's Encrypt automatically.",
+      "command": "sudo himosoft-k3s-server bootstrap"
     },
     {
-      "title": "Enable Let's Encrypt (after DNS)",
-      "command": "sudo himosoft-k3s-server fix-ssl"
+      "title": "Login flow",
+      "body": "Open any protected URL → redirected to Authelia → login → access the UI. Argo CD and Dashboard still use their own credentials after Authelia."
     }
   ],
   "commands": [
+    { "command": "sudo himosoft-k3s-server help", "description": "Show usage and available commands" },
     { "command": "sudo himosoft-k3s-server install", "description": "Full interactive setup (K3s + platform + Authelia)" },
-    { "command": "sudo himosoft-k3s-server bootstrap", "description": "Platform only — prompts for Authelia creds if missing" },
-    { "command": "sudo himosoft-k3s-server fix-auth", "description": "Re-apply Authelia middleware on all UIs" },
-    { "command": "sudo himosoft-k3s-server fix-ingress", "description": "Fix Argo CD redirect loop behind Traefik" },
-    { "command": "sudo himosoft-k3s-server fix-ssl", "description": "Verify DNS and enable Let's Encrypt" },
+    { "command": "sudo himosoft-k3s-server bootstrap", "description": "Platform only — skips installed components, enables SSL when DNS ready" },
     { "command": "sudo himosoft-k3s-server credentials", "description": "Authelia user, Argo CD password, dashboard token" },
     { "command": "sudo himosoft-k3s-server status", "description": "Cluster health and pod summary" }
   ],
   "notes": [
+    "Running with no arguments shows help — setup starts only with install",
+    "apt install does not run setup automatically",
     "Login is password-only (one_factor) — no TOTP or mail server required",
     "Re-running install or bootstrap skips components that are already installed",
     "Reconfigure prompts appear only when hostnames or settings change",

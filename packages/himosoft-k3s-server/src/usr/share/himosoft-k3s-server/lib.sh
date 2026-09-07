@@ -474,7 +474,7 @@ check_dns_for_ssl() {
   else
     ENABLE_LETSENCRYPT=no
     warn "DNS not ready — skipping Let's Encrypt (Traefik default cert for now)"
-    warn "After fixing DNS, run: sudo himosoft-k3s-server fix-ssl"
+    warn "After fixing DNS, re-run: sudo himosoft-k3s-server bootstrap"
   fi
   export ENABLE_LETSENCRYPT
 }

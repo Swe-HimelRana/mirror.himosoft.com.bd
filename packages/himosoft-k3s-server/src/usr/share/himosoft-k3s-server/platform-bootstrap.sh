@@ -152,7 +152,7 @@ print_summary() {
   if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
     ssl_note="Let's Encrypt (trusted HTTPS)"
   else
-    ssl_note="Traefik default cert (browser warning until: sudo himosoft-k3s-server fix-ssl)"
+    ssl_note="Traefik default cert (browser warning — point DNS then re-run: sudo himosoft-k3s-server bootstrap)"
   fi
 
   if [[ "${INSTALL_ARGOCD:-yes}" == "yes" ]]; then
