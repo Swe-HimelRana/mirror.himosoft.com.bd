@@ -24,7 +24,14 @@ if [[ -z "${PUBLIC_IP}" || -z "${DOMAIN}" ]]; then
   exit 1
 fi
 
+install_progress_init_from_env
+
 if [[ "${SKIP_K3S:-no}" == "yes" ]] || { command -v k3s >/dev/null 2>&1 && systemctl is-active k3s &>/dev/null; }; then
+  install_progress_init_from_env
+  if (( INSTALL_PROGRESS_W_K3S > 0 )); then
+    INSTALL_PROGRESS_DONE_WEIGHT=$(( INSTALL_PROGRESS_DONE_WEIGHT + INSTALL_PROGRESS_W_K3S ))
+    export INSTALL_PROGRESS_DONE_WEIGHT
+  fi
   log "K3s is already running — skipping K3s install"
   wait_for_k3s
   exec "${SHARE}/platform-bootstrap.sh"
@@ -38,6 +45,8 @@ TLS_SANS=(
   "${DASH_FQDN}"
   "${TRAEFIK_FQDN}"
 )
+
+install_progress_step_begin "Installing K3s" "${INSTALL_PROGRESS_W_K3S:-12}"
 
 mkdir -p /etc/rancher/k3s
 
@@ -59,10 +68,14 @@ if [[ -n "${K3S_VERSION}" ]]; then
 fi
 
 log "Installing K3s (${K3S_VERSION:-latest})"
+install_progress_sub 20 "Downloading K3s"
 curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="${INSTALL_ARGS}" sh -
 
+install_progress_sub 70 "Starting K3s"
 wait_for_k3s
+install_progress_sub 100 "K3s node ready"
 log "K3s node ready"
 k get nodes
 
+install_progress_step_end
 exec "${SHARE}/platform-bootstrap.sh"

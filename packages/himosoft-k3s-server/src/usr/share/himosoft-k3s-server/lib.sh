@@ -9,28 +9,180 @@ k() {
 }
 
 log() {
+  install_progress_before_output
   echo "==> $*"
+  install_progress_after_output
 }
 
-print_wait_progress() {
-  local elapsed=$1 max=$2 label=$3
-  local width=28 pct filled empty bar="" i
-  (( max < 1 )) && max=1
-  pct=$(( elapsed * 100 / max ))
+# Apt-style overall install progress — fixed bar on the last terminal line.
+install_progress_is_tty() {
+  [[ -t 1 ]] && [[ -n "${TERM:-}" ]] && command -v tput >/dev/null 2>&1
+}
+
+install_progress_reset() {
+  INSTALL_PROGRESS_ACTIVE=no
+  INSTALL_PROGRESS_PCT=0
+  INSTALL_PROGRESS_LABEL="Starting"
+  INSTALL_PROGRESS_DONE_WEIGHT=0
+  INSTALL_PROGRESS_CURRENT_WEIGHT=0
+  INSTALL_PROGRESS_TOTAL_WEIGHT=100
+  INSTALL_PROGRESS_SUB_PCT=0
+}
+
+install_progress_recalc() {
+  local partial=0
+  partial=$(( INSTALL_PROGRESS_CURRENT_WEIGHT * INSTALL_PROGRESS_SUB_PCT / 100 ))
+  if (( INSTALL_PROGRESS_TOTAL_WEIGHT > 0 )); then
+    INSTALL_PROGRESS_PCT=$(( (INSTALL_PROGRESS_DONE_WEIGHT + partial) * 100 / INSTALL_PROGRESS_TOTAL_WEIGHT ))
+  else
+    INSTALL_PROGRESS_PCT=100
+  fi
+  (( INSTALL_PROGRESS_PCT > 100 )) && INSTALL_PROGRESS_PCT=100
+}
+
+install_progress_redraw() {
+  [[ "${INSTALL_PROGRESS_ACTIVE:-}" == yes ]] || return 0
+  if ! install_progress_is_tty; then
+    return 0
+  fi
+  local pct="${INSTALL_PROGRESS_PCT:-0}" label="${INSTALL_PROGRESS_LABEL:-Installing}"
+  local width=46 filled empty bar="" rows i
   (( pct > 100 )) && pct=100
   filled=$(( pct * width / 100 ))
   empty=$(( width - filled ))
   for ((i = 0; i < filled; i++)); do bar+='#'; done
-  for ((i = 0; i < empty; i++)); do bar+='-'; done
-  printf '\r==> [%s] %3d%% (%ds/%ds) %s' "${bar}" "${pct}" "${elapsed}" "${max}" "${label}" >&2
+  for ((i = 0; i < empty; i++)); do bar+='.'; done
+  rows=$(tput lines)
+  tput sc 2>/dev/null || true
+  tput cup $(( rows - 1 )) 0 2>/dev/null || true
+  tput el 2>/dev/null || true
+  printf 'Progress: [%3d%%] [%s] %s' "${pct}" "${bar}" "${label}"
+  tput rc 2>/dev/null || true
+}
+
+install_progress_before_output() {
+  [[ "${INSTALL_PROGRESS_ACTIVE:-}" == yes ]] || return 0
+  if ! install_progress_is_tty; then
+    return 0
+  fi
+  local rows
+  rows=$(tput lines)
+  tput cup $(( rows - 1 )) 0 2>/dev/null || true
+  tput el 2>/dev/null || true
+}
+
+install_progress_after_output() {
+  install_progress_redraw
+}
+
+install_progress_start() {
+  install_progress_reset
+  INSTALL_PROGRESS_ACTIVE=yes
+  export INSTALL_PROGRESS_ACTIVE
+  if install_progress_is_tty; then
+    printf '\n' >&2
+  fi
+  install_progress_redraw
+}
+
+install_progress_finish() {
+  if [[ "${INSTALL_PROGRESS_ACTIVE:-}" == yes ]] && install_progress_is_tty; then
+    local rows
+    rows=$(tput lines)
+    tput cup $(( rows - 1 )) 0 2>/dev/null || true
+    tput el 2>/dev/null || true
+    printf 'Progress: [100%%] [%s] Complete\n' "$(printf '%*s' 46 '' | tr ' ' '#')"
+  fi
+  INSTALL_PROGRESS_ACTIVE=no
+  export INSTALL_PROGRESS_ACTIVE
+}
+
+install_progress_step_begin() {
+  INSTALL_PROGRESS_LABEL="${1:-Installing}"
+  INSTALL_PROGRESS_CURRENT_WEIGHT="${2:-5}"
+  INSTALL_PROGRESS_SUB_PCT=0
+  install_progress_recalc
+  install_progress_redraw
+}
+
+install_progress_step_end() {
+  INSTALL_PROGRESS_DONE_WEIGHT=$(( INSTALL_PROGRESS_DONE_WEIGHT + INSTALL_PROGRESS_CURRENT_WEIGHT ))
+  INSTALL_PROGRESS_SUB_PCT=100
+  install_progress_recalc
+  export INSTALL_PROGRESS_DONE_WEIGHT
+  install_progress_redraw
+}
+
+install_progress_sub() {
+  local sub_pct="${1:-0}" sub_label="${2:-}"
+  (( sub_pct > 100 )) && sub_pct=100
+  [[ -n "${sub_label}" ]] && INSTALL_PROGRESS_LABEL="${sub_label}"
+  INSTALL_PROGRESS_SUB_PCT="${sub_pct}"
+  install_progress_recalc
+  install_progress_redraw
+}
+
+# Build step weights from install plan (respects SKIP_* / feature flags).
+install_progress_init_from_env() {
+  local done="${INSTALL_PROGRESS_DONE_WEIGHT:-0}" total=0
+  local w_k3s=0 w_coredns=2 w_traefik=0 w_certmgr=0 w_tls=0 w_authelia=0 w_argocd=0 w_dashboard=0 w_ingress=0 w_finish=3
+
+  [[ "${SKIP_K3S:-no}" != "yes" ]] && w_k3s=12
+  [[ "${SKIP_TRAEFIK:-no}" != "yes" ]] && w_traefik=10
+  if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
+    w_certmgr=8
+    w_tls=14
+  fi
+  if [[ "${SKIP_AUTHELIA:-no}" != "yes" && "${INSTALL_AUTHELIA:-yes}" == "yes" ]]; then
+    w_authelia=14
+  fi
+  if [[ "${SKIP_ARGOCD:-no}" != "yes" && "${INSTALL_ARGOCD:-yes}" == "yes" ]]; then
+    w_argocd=22
+  fi
+  [[ "${SKIP_DASHBOARD:-no}" != "yes" ]] && w_dashboard=10
+  [[ "${SKIP_INGRESS:-no}" != "yes" ]] && w_ingress=5
+
+  total=$(( w_k3s + w_coredns + w_traefik + w_certmgr + w_tls + w_authelia + w_argocd + w_dashboard + w_ingress + w_finish ))
+  (( total < 1 )) && total=100
+
+  INSTALL_PROGRESS_TOTAL_WEIGHT=${total}
+  INSTALL_PROGRESS_DONE_WEIGHT=${done}
+  INSTALL_PROGRESS_W_K3S=${w_k3s}
+  INSTALL_PROGRESS_W_COREDNS=${w_coredns}
+  INSTALL_PROGRESS_W_TRAEFIK=${w_traefik}
+  INSTALL_PROGRESS_W_CERTMGR=${w_certmgr}
+  INSTALL_PROGRESS_W_TLS=${w_tls}
+  INSTALL_PROGRESS_W_AUTHELIA=${w_authelia}
+  INSTALL_PROGRESS_W_ARGOCD=${w_argocd}
+  INSTALL_PROGRESS_W_DASHBOARD=${w_dashboard}
+  INSTALL_PROGRESS_W_INGRESS=${w_ingress}
+  INSTALL_PROGRESS_W_FINISH=${w_finish}
+  export INSTALL_PROGRESS_TOTAL_WEIGHT INSTALL_PROGRESS_DONE_WEIGHT
+
+  if [[ "${INSTALL_PROGRESS_ACTIVE:-}" != "yes" ]]; then
+    install_progress_start
+    INSTALL_PROGRESS_DONE_WEIGHT=${done}
+    install_progress_recalc
+  else
+    install_progress_recalc
+    install_progress_redraw
+  fi
+}
+
+print_wait_progress() {
+  local elapsed=$1 max=$2 label=$3
+  (( max < 1 )) && max=1
+  install_progress_sub $(( elapsed * 100 / max )) "${label}"
 }
 
 clear_wait_progress() {
-  printf '\r%*s\r' 88 "" >&2
+  :
 }
 
 warn() {
+  install_progress_before_output
   echo "==> WARNING: $*" >&2
+  install_progress_after_output
 }
 
 need_cmd() {
@@ -51,6 +203,7 @@ wait_for_k3s() {
     if k get nodes >/dev/null 2>&1; then
       return 0
     fi
+    install_progress_sub $(( i * 100 / 60 )) "Waiting for K3s API"
     sleep 5
   done
   echo "Timed out waiting for K3s API." >&2
@@ -213,16 +366,14 @@ wait_for_coredns() {
   while (( elapsed < max_wait )); do
     if k get deployment coredns -n kube-system >/dev/null 2>&1 && \
        deployment_ready kube-system coredns; then
-      clear_wait_progress
       log "CoreDNS is ready"
       sleep 3
       return 0
     fi
-    print_wait_progress "${elapsed}" "${max_wait}" "CoreDNS"
+    install_progress_sub $(( elapsed * 100 / max_wait )) "CoreDNS"
     sleep 5
     elapsed=$((elapsed + 5))
   done
-  clear_wait_progress
   warn "CoreDNS not ready after ${max_wait}s — continuing (DNS may still be starting)"
 }
 

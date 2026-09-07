@@ -30,16 +30,18 @@ ARGOCD_MANIFEST="https://raw.githubusercontent.com/argoproj/argo-cd/stable/manif
 DASHBOARD_MANIFEST="https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml"
 TRAEFIK_CHART_VERSION="${TRAEFIK_CHART_VERSION:-}"
 
+check_dns_for_ssl
+install_progress_init_from_env
+
+install_progress_step_begin "CoreDNS" "${INSTALL_PROGRESS_W_COREDNS:-2}"
 wait_for_coredns
+install_progress_step_end
 
 install_traefik() {
   if [[ "${SKIP_TRAEFIK:-no}" == "yes" ]]; then
     log "Traefik already installed — skipping (declined reconfigure or unchanged)"
-    check_dns_for_ssl
     return 0
   fi
-
-  check_dns_for_ssl
 
   if helm status traefik -n traefik >/dev/null 2>&1; then
     log "Traefik release exists — upgrading"
@@ -282,19 +284,44 @@ EOF
   fi
 }
 
+install_progress_step_begin "Traefik" "${INSTALL_PROGRESS_W_TRAEFIK:-10}"
 install_traefik
 migrate_traefik_to_certmanager
+install_progress_step_end
+
+install_progress_step_begin "cert-manager" "${INSTALL_PROGRESS_W_CERTMGR:-0}"
 install_cert_manager
+install_progress_step_end
+
+install_progress_step_begin "TLS certificates" "${INSTALL_PROGRESS_W_TLS:-0}"
 sync_all_tls_certificates
+install_progress_step_end
+
+install_progress_step_begin "Authelia SSO" "${INSTALL_PROGRESS_W_AUTHELIA:-0}"
 install_authelia
+install_progress_step_end
+
+install_progress_step_begin "Argo CD" "${INSTALL_PROGRESS_W_ARGOCD:-0}"
 install_argocd
+install_progress_step_end
+
+install_progress_step_begin "Kubernetes Dashboard" "${INSTALL_PROGRESS_W_DASHBOARD:-0}"
 install_k8s_dashboard
+install_progress_step_end
+
+install_progress_step_begin "Ingress routes" "${INSTALL_PROGRESS_W_INGRESS:-0}"
 install_ingressroutes
+install_progress_step_end
 
 if [[ "${SKIP_TRAEFIK:-no}" == yes && "${SKIP_AUTHELIA:-no}" == yes \
    && "${SKIP_ARGOCD:-no}" == yes && "${SKIP_DASHBOARD:-no}" == yes \
    && "${SKIP_INGRESS:-no}" == yes ]]; then
   log "All platform components already installed — no changes applied"
 fi
+
+install_progress_step_begin "Finishing" "${INSTALL_PROGRESS_W_FINISH:-3}"
+install_progress_sub 100 "Complete"
+install_progress_step_end
+install_progress_finish
 
 print_summary
