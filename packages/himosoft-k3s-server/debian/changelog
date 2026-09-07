@@ -1,3 +1,11 @@
+himosoft-k3s-server (1.5.1) stable; urgency=medium
+
+  * Certificate issuance no longer aborts install on rate limits or timeouts
+  * Auto-fallback to Let's Encrypt staging when production is rate limited
+  * Fail fast on ACME 429 with retry-after hint
+
+ -- Himosoft <admin@himosoft.com.bd>  Tue, 09 Sep 2026 00:15:00 +0600
+
 himosoft-k3s-server (1.5.0) stable; urgency=medium
 
   * TLS via cert-manager + Let's Encrypt (replaces Traefik native ACME)

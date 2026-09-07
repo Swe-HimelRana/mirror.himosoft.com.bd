@@ -180,7 +180,11 @@ install_ingressroutes() {
 
 print_summary() {
   local argocd_pass="" dashboard_token="" ssl_note
-  if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
+  if [[ "${TLS_USING_STAGING:-no}" == "yes" ]]; then
+    ssl_note="Let's Encrypt staging via cert-manager (browser untrusted — re-run bootstrap for production certs)"
+  elif [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" && "${TLS_CERTS_PENDING:-0}" -gt 0 ]]; then
+    ssl_note="cert-manager — ${TLS_CERTS_PENDING} certificate(s) pending (re-run: sudo himosoft-k3s-server bootstrap)"
+  elif [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
     ssl_note="Let's Encrypt via cert-manager (trusted HTTPS)"
   else
     ssl_note="Traefik default cert (browser warning — point DNS then re-run: sudo himosoft-k3s-server bootstrap)"

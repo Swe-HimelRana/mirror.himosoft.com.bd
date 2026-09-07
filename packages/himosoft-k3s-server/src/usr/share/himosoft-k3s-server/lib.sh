@@ -345,6 +345,7 @@ apply_template() {
     -e "s|@CERT_NAME@|${CERT_NAME:-}|g" \
     -e "s|@SECRET_NAME@|${SECRET_NAME:-}|g" \
     -e "s|@NAMESPACE@|${NAMESPACE:-}|g" \
+    -e "s|@ISSUER_NAME@|${ISSUER_NAME:-letsencrypt}|g" \
     "${template}"
 }
 
@@ -636,6 +637,18 @@ write_traefik_values() {
   chmod 600 "${out}"
 }
 
+certificate_rate_limited() {
+  local ns="$1" name="$2"
+  k describe certificate "${name}" -n "${ns}" 2>/dev/null \
+    | grep -qE 'rateLimited|too many certificates'
+}
+
+certificate_retry_after_hint() {
+  local ns="$1" name="$2"
+  k describe certificate "${name}" -n "${ns}" 2>/dev/null \
+    | grep -oE 'retry after [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]+ UTC' | head -1 || true
+}
+
 wait_for_certificate() {
   local ns="$1" name="$2" max_wait="${3:-300}"
   local start now elapsed=0 status="" reason="" message=""
@@ -644,7 +657,13 @@ wait_for_certificate() {
   while (( elapsed < max_wait )); do
     now="$(date +%s)"
     elapsed=$((now - start))
-    print_wait_progress "${elapsed}" "${max_wait}" "certificate ${name}"
+    print_wait_progress "${elapsed}" "${max_wait}" "cert ${name}"
+    if certificate_rate_limited "${ns}" "${name}"; then
+      clear_wait_progress
+      message="$(certificate_retry_after_hint "${ns}" "${name}")"
+      warn "Let's Encrypt rate limit for ${name}${message:+ — ${message}}"
+      return 2
+    fi
     status="$(k get certificate "${name}" -n "${ns}" \
       -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
     reason="$(k get certificate "${name}" -n "${ns}" \
@@ -656,33 +675,76 @@ wait_for_certificate() {
     fi
     if [[ "${status}" == "False" && "${reason}" != "Issuing" && "${reason}" != "DoesNotExist" ]]; then
       clear_wait_progress
+      if certificate_rate_limited "${ns}" "${name}"; then
+        message="$(certificate_retry_after_hint "${ns}" "${name}")"
+        warn "Let's Encrypt rate limit for ${name}${message:+ — ${message}}"
+        return 2
+      fi
       message="$(k get certificate "${name}" -n "${ns}" \
         -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null || true)"
       warn "certificate/${name} failed (${reason}): ${message}"
-      k describe certificate "${name}" -n "${ns}" 2>/dev/null | sed -n '/Events:/,$p' | tail -15 || true
+      k describe certificate "${name}" -n "${ns}" 2>/dev/null | sed -n '/Events:/,$p' | tail -10 || true
       return 1
     fi
     sleep 5
   done
   clear_wait_progress
-  warn "Timed out waiting for certificate/${name} in ${ns}"
-  k describe certificate "${name}" -n "${ns}" 2>/dev/null | sed -n '/Events:/,$p' | tail -15 || true
+  if certificate_rate_limited "${ns}" "${name}"; then
+    message="$(certificate_retry_after_hint "${ns}" "${name}")"
+    warn "Let's Encrypt rate limit for ${name}${message:+ — ${message}}"
+    return 2
+  fi
+  warn "Timed out waiting for certificate/${name} in ${ns} — continuing install"
+  k describe certificate "${name}" -n "${ns}" 2>/dev/null | sed -n '/Events:/,$p' | tail -10 || true
   return 1
 }
 
 ensure_tls_certificate() {
-  local fqdn="$1" ns="$2"
+  local fqdn="$1" ns="$2" issuer="${3:-letsencrypt}"
   local share="${SHARE:-/usr/share/himosoft-k3s-server}"
-  local secret_name cert_name
+  local secret_name cert_name current_issuer rc=0
   secret_name="$(tls_secret_name "${fqdn}")"
   cert_name="${secret_name}"
 
   k create namespace "${ns}" --dry-run=client -o yaml | k apply -f - >/dev/null 2>&1 || true
 
+  current_issuer="$(k get certificate "${cert_name}" -n "${ns}" \
+    -o jsonpath='{.spec.issuerRef.name}' 2>/dev/null || true)"
+  if [[ -n "${current_issuer}" && "${current_issuer}" != "${issuer}" ]]; then
+    k delete certificate "${cert_name}" -n "${ns}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    sleep 2
+  fi
+
   FQDN="${fqdn}" NAMESPACE="${ns}" SECRET_NAME="${secret_name}" CERT_NAME="${cert_name}"
-  export FQDN NAMESPACE SECRET_NAME CERT_NAME
+  ISSUER_NAME="${issuer}"
+  export FQDN NAMESPACE SECRET_NAME CERT_NAME ISSUER_NAME
   apply_template "${share}/manifests/cert-manager/certificate.yaml.template" | k apply -f -
-  wait_for_certificate "${ns}" "${cert_name}" 300
+  wait_for_certificate "${ns}" "${cert_name}" 300 || rc=$?
+  return "${rc}"
+}
+
+sync_tls_certificate() {
+  local fqdn="$1" ns="$2" issuer="${3:-letsencrypt}"
+  local rc=0
+  ensure_tls_certificate "${fqdn}" "${ns}" "${issuer}" || rc=$?
+  if [[ "${rc}" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ "${rc}" -eq 2 ]]; then
+    TLS_RATE_LIMITED=yes
+    export TLS_RATE_LIMITED
+    if [[ "${issuer}" == "letsencrypt" && "${TLS_USING_STAGING:-no}" != "yes" ]]; then
+      log "Production rate limited — switching to Let's Encrypt staging for ${fqdn}"
+      TLS_USING_STAGING=yes
+      export TLS_USING_STAGING
+      ensure_tls_certificate "${fqdn}" "${ns}" "letsencrypt-staging" || true
+      return 0
+    fi
+  fi
+  TLS_CERTS_PENDING=$((TLS_CERTS_PENDING + 1))
+  export TLS_CERTS_PENDING
+  warn "Certificate for ${fqdn} not ready — install will continue"
+  return 0
 }
 
 sync_all_tls_certificates() {
@@ -690,23 +752,48 @@ sync_all_tls_certificates() {
     return 0
   fi
 
-  log "Issuing TLS certificates (cert-manager + Let's Encrypt)..."
-  ensure_tls_certificate "${TRAEFIK_FQDN}" traefik
-  ensure_tls_certificate "${DASH_FQDN}" kubernetes-dashboard
+  local issuer="letsencrypt"
+  TLS_CERTS_PENDING=0
+  TLS_USING_STAGING=no
+  TLS_RATE_LIMITED=no
+  export TLS_CERTS_PENDING TLS_USING_STAGING TLS_RATE_LIMITED
 
-  if [[ "${INSTALL_ARGOCD:-yes}" == "yes" && -n "${ARGOCD_FQDN:-}" ]]; then
-    ensure_tls_certificate "${ARGOCD_FQDN}" argocd
+  if [[ "${ACME_STAGING:-no}" == "yes" ]]; then
+    issuer="letsencrypt-staging"
+    TLS_USING_STAGING=yes
+    export TLS_USING_STAGING
+    log "Using Let's Encrypt staging (ACME_STAGING=yes)"
   fi
 
+  log "Issuing TLS certificates (cert-manager + Let's Encrypt)..."
+  sync_tls_certificate "${TRAEFIK_FQDN}" traefik "${issuer}"
+  [[ "${TLS_USING_STAGING:-no}" == "yes" ]] && issuer="letsencrypt-staging"
+  sync_tls_certificate "${DASH_FQDN}" kubernetes-dashboard "${issuer}"
+  [[ "${TLS_USING_STAGING:-no}" == "yes" ]] && issuer="letsencrypt-staging"
+
+  if [[ "${INSTALL_ARGOCD:-yes}" == "yes" && -n "${ARGOCD_FQDN:-}" ]]; then
+    sync_tls_certificate "${ARGOCD_FQDN}" argocd "${issuer}"
+  fi
+  [[ "${TLS_USING_STAGING:-no}" == "yes" ]] && issuer="letsencrypt-staging"
+
   if authelia_enabled; then
-    ensure_tls_certificate "${AUTH_FQDN}" authelia
+    sync_tls_certificate "${AUTH_FQDN}" authelia "${issuer}"
   fi
 
   if k get deployment traefik -n traefik >/dev/null 2>&1; then
     k rollout restart deployment/traefik -n traefik >/dev/null 2>&1 || true
     wait_for_deployment traefik traefik 180
   fi
-  log "TLS certificates ready"
+
+  if [[ "${TLS_USING_STAGING:-no}" == "yes" ]]; then
+    warn "Staging certificates in use — browsers will show untrusted HTTPS"
+    warn "After Let's Encrypt rate limit clears, run: sudo himosoft-k3s-server bootstrap"
+  elif [[ "${TLS_CERTS_PENDING:-0}" -gt 0 ]]; then
+    warn "${TLS_CERTS_PENDING} certificate(s) not ready — run: sudo himosoft-k3s-server bootstrap"
+  else
+    log "TLS certificates ready"
+  fi
+  return 0
 }
 
 install_cert_manager() {
@@ -717,10 +804,15 @@ install_cert_manager() {
   local share="${SHARE:-/usr/share/himosoft-k3s-server}"
   local chart_version="${CERT_MANAGER_CHART_VERSION:-}"
 
+  apply_cluster_issuers() {
+    apply_template "${share}/manifests/cert-manager/cluster-issuer.yaml.template" | k apply -f -
+    apply_template "${share}/manifests/cert-manager/cluster-issuer-staging.yaml.template" | k apply -f -
+  }
+
   if k get deployment cert-manager -n cert-manager >/dev/null 2>&1 \
     && deployment_ready cert-manager cert-manager; then
-    log "cert-manager already running — syncing ClusterIssuer"
-    apply_template "${share}/manifests/cert-manager/cluster-issuer.yaml.template" | k apply -f -
+    log "cert-manager already running — syncing ClusterIssuers"
+    apply_cluster_issuers
     return 0
   fi
 
@@ -748,7 +840,7 @@ install_cert_manager() {
   wait_for_deployment cert-manager cert-manager-webhook 300
   wait_for_deployment cert-manager cert-manager-cainjector 300
 
-  apply_template "${share}/manifests/cert-manager/cluster-issuer.yaml.template" | k apply -f -
+  apply_cluster_issuers
   log "cert-manager ready"
 }
 

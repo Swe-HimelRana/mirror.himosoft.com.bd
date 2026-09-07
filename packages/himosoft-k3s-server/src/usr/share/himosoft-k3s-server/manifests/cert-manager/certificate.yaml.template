@@ -6,7 +6,7 @@ metadata:
 spec:
   secretName: @SECRET_NAME@
   issuerRef:
-    name: letsencrypt
+    name: @ISSUER_NAME@
     kind: ClusterIssuer
   dnsNames:
     - @FQDN@
