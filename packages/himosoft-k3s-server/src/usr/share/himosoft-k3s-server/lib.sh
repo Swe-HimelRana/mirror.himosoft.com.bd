@@ -39,10 +39,11 @@ install_progress_reset() {
 }
 
 install_progress_recalc() {
-  local partial=0
-  partial=$(( INSTALL_PROGRESS_CURRENT_WEIGHT * INSTALL_PROGRESS_SUB_PCT / 100 ))
-  if (( INSTALL_PROGRESS_TOTAL_WEIGHT > 0 )); then
-    INSTALL_PROGRESS_PCT=$(( (INSTALL_PROGRESS_DONE_WEIGHT + partial) * 100 / INSTALL_PROGRESS_TOTAL_WEIGHT ))
+  local partial=0 cur="${INSTALL_PROGRESS_CURRENT_WEIGHT:-0}" done="${INSTALL_PROGRESS_DONE_WEIGHT:-0}"
+  local sub="${INSTALL_PROGRESS_SUB_PCT:-0}" total="${INSTALL_PROGRESS_TOTAL_WEIGHT:-100}"
+  partial=$(( cur * sub / 100 ))
+  if (( total > 0 )); then
+    INSTALL_PROGRESS_PCT=$(( (done + partial) * 100 / total ))
   else
     INSTALL_PROGRESS_PCT=100
   fi
@@ -136,7 +137,7 @@ install_progress_step_begin() {
 install_progress_step_end() {
   local weight="${INSTALL_PROGRESS_CURRENT_WEIGHT:-0}"
   (( weight == 0 )) && return 0
-  INSTALL_PROGRESS_DONE_WEIGHT=$(( INSTALL_PROGRESS_DONE_WEIGHT + weight ))
+  INSTALL_PROGRESS_DONE_WEIGHT=$(( ${INSTALL_PROGRESS_DONE_WEIGHT:-0} + weight ))
   INSTALL_PROGRESS_SUB_PCT=100
   install_progress_recalc
   export INSTALL_PROGRESS_DONE_WEIGHT
@@ -144,7 +145,9 @@ install_progress_step_end() {
 }
 
 install_progress_sub() {
-  (( INSTALL_PROGRESS_CURRENT_WEIGHT == 0 )) && return 0
+  [[ "${INSTALL_PROGRESS_ACTIVE:-}" == "yes" ]] || return 0
+  local cur="${INSTALL_PROGRESS_CURRENT_WEIGHT:-0}"
+  (( cur == 0 )) && return 0
   local sub_pct="${1:-0}" sub_label="${2:-}"
   (( sub_pct > 100 )) && sub_pct=100
   [[ -n "${sub_label}" ]] && INSTALL_PROGRESS_LABEL="${sub_label}"
@@ -168,6 +171,7 @@ install_progress_run_step() {
 # Build step weights from install plan (respects SKIP_* / feature flags).
 install_progress_init_from_env() {
   if install_progress_is_noop_install; then
+    install_progress_reset
     INSTALL_PROGRESS_ACTIVE=no
     export INSTALL_PROGRESS_ACTIVE
     return 0

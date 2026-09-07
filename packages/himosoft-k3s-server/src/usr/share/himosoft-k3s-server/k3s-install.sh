@@ -57,7 +57,9 @@ _install_k3s() {
 
 if [[ "${SKIP_K3S:-no}" == "yes" ]] || { command -v k3s >/dev/null 2>&1 && systemctl is-active k3s &>/dev/null; }; then
   log "K3s is already running — skipping K3s install"
-  wait_for_k3s
+  if ! install_progress_is_noop_install; then
+    wait_for_k3s
+  fi
   exec "${SHARE}/platform-bootstrap.sh"
 fi
 
