@@ -252,7 +252,7 @@ k8s_namespace_exists() {
   k get namespace "$1" >/dev/null 2>&1
 }
 
-# Sets STATE_K3S STATE_TRAEFIK STATE_AUTHELIA STATE_ARGOCD STATE_DASHBOARD
+# Sets STATE_K3S STATE_TRAEFIK STATE_AUTHELIA STATE_ARGOCD STATE_DASHBOARD STATE_CERT_MANAGER
 # Values: missing | installed | ready
 detect_platform_state() {
   STATE_K3S=missing
@@ -260,6 +260,7 @@ detect_platform_state() {
   STATE_AUTHELIA=missing
   STATE_ARGOCD=missing
   STATE_DASHBOARD=missing
+  STATE_CERT_MANAGER=missing
 
   if command -v k3s >/dev/null 2>&1; then
     if k3s_running; then
@@ -304,6 +305,16 @@ detect_platform_state() {
       STATE_DASHBOARD=installed
     fi
   fi
+
+  if k8s_namespace_exists cert-manager; then
+    if deployment_ready cert-manager cert-manager; then
+      STATE_CERT_MANAGER=ready
+    else
+      STATE_CERT_MANAGER=installed
+    fi
+  else
+    STATE_CERT_MANAGER=missing
+  fi
 }
 
 platform_state_label() {
@@ -330,7 +341,15 @@ apply_template() {
     -e "s|@AUTH_FQDN@|${AUTH_FQDN:-}|g" \
     -e "s|@DOMAIN@|${DOMAIN}|g" \
     -e "s|@ACME_EMAIL@|${ACME_EMAIL:-admin@${DOMAIN}}|g" \
+    -e "s|@FQDN@|${FQDN:-}|g" \
+    -e "s|@CERT_NAME@|${CERT_NAME:-}|g" \
+    -e "s|@SECRET_NAME@|${SECRET_NAME:-}|g" \
+    -e "s|@NAMESPACE@|${NAMESPACE:-}|g" \
     "${template}"
+}
+
+tls_secret_name() {
+  echo "tls-$(echo "${1}" | tr '[:upper:]' '[:lower:]' | tr '.' '-')"
 }
 
 authelia_enabled() {
@@ -550,11 +569,11 @@ dns_points_to_ip() {
 render_tls_block() {
   local fqdn="$1"
   if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
+    local secret
+    secret="$(tls_secret_name "${fqdn}")"
     cat <<EOF
   tls:
-    certResolver: letsencrypt
-    domains:
-      - main: "${fqdn}"
+    secretName: ${secret}
 EOF
   else
     echo "  tls: {}"
@@ -583,7 +602,7 @@ check_dns_for_ssl() {
 
   if [[ "${all_ok}" -eq 1 ]]; then
     ENABLE_LETSENCRYPT=yes
-    log "DNS verified — Let's Encrypt SSL will be enabled"
+    log "DNS verified — cert-manager will obtain Let's Encrypt certificates"
   else
     ENABLE_LETSENCRYPT=no
     warn "DNS not ready — skipping Let's Encrypt (Traefik default cert for now)"
@@ -598,7 +617,7 @@ write_traefik_values() {
   mkdir -p /etc/himosoft
   local tls_block="" line
   if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
-    tls_block=$'    tls:\n      certResolver: letsencrypt'
+    tls_block=$"    tls:\n      secretName: $(tls_secret_name "${TRAEFIK_FQDN}")"
   fi
   while IFS= read -r line || [[ -n "${line}" ]]; do
     if [[ "${line}" == *"@TRAEFIK_DASHBOARD_TLS@"* ]]; then
@@ -612,9 +631,125 @@ write_traefik_values() {
     fi
   done < <(apply_template "${share}/traefik-values.yaml.template") > "${out}"
   if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
-    apply_template "${share}/traefik-values-acme.yaml.template" >> "${out}"
+    apply_template "${share}/traefik-values-certmanager.yaml.template" >> "${out}"
   fi
   chmod 600 "${out}"
+}
+
+wait_for_certificate() {
+  local ns="$1" name="$2" max_wait="${3:-300}"
+  local start now elapsed=0 status="" reason="" message=""
+  start="$(date +%s)"
+  log "Waiting for certificate/${name} in ${ns} (up to ${max_wait}s)..."
+  while (( elapsed < max_wait )); do
+    now="$(date +%s)"
+    elapsed=$((now - start))
+    print_wait_progress "${elapsed}" "${max_wait}" "certificate ${name}"
+    status="$(k get certificate "${name}" -n "${ns}" \
+      -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+    reason="$(k get certificate "${name}" -n "${ns}" \
+      -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}' 2>/dev/null || true)"
+    if [[ "${status}" == "True" ]]; then
+      clear_wait_progress
+      log "certificate/${name} is ready"
+      return 0
+    fi
+    if [[ "${status}" == "False" && "${reason}" != "Issuing" && "${reason}" != "DoesNotExist" ]]; then
+      clear_wait_progress
+      message="$(k get certificate "${name}" -n "${ns}" \
+        -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null || true)"
+      warn "certificate/${name} failed (${reason}): ${message}"
+      k describe certificate "${name}" -n "${ns}" 2>/dev/null | sed -n '/Events:/,$p' | tail -15 || true
+      return 1
+    fi
+    sleep 5
+  done
+  clear_wait_progress
+  warn "Timed out waiting for certificate/${name} in ${ns}"
+  k describe certificate "${name}" -n "${ns}" 2>/dev/null | sed -n '/Events:/,$p' | tail -15 || true
+  return 1
+}
+
+ensure_tls_certificate() {
+  local fqdn="$1" ns="$2"
+  local share="${SHARE:-/usr/share/himosoft-k3s-server}"
+  local secret_name cert_name
+  secret_name="$(tls_secret_name "${fqdn}")"
+  cert_name="${secret_name}"
+
+  k create namespace "${ns}" --dry-run=client -o yaml | k apply -f - >/dev/null 2>&1 || true
+
+  FQDN="${fqdn}" NAMESPACE="${ns}" SECRET_NAME="${secret_name}" CERT_NAME="${cert_name}"
+  export FQDN NAMESPACE SECRET_NAME CERT_NAME
+  apply_template "${share}/manifests/cert-manager/certificate.yaml.template" | k apply -f -
+  wait_for_certificate "${ns}" "${cert_name}" 300
+}
+
+sync_all_tls_certificates() {
+  if [[ "${ENABLE_LETSENCRYPT:-no}" != "yes" ]]; then
+    return 0
+  fi
+
+  log "Issuing TLS certificates (cert-manager + Let's Encrypt)..."
+  ensure_tls_certificate "${TRAEFIK_FQDN}" traefik
+  ensure_tls_certificate "${DASH_FQDN}" kubernetes-dashboard
+
+  if [[ "${INSTALL_ARGOCD:-yes}" == "yes" && -n "${ARGOCD_FQDN:-}" ]]; then
+    ensure_tls_certificate "${ARGOCD_FQDN}" argocd
+  fi
+
+  if authelia_enabled; then
+    ensure_tls_certificate "${AUTH_FQDN}" authelia
+  fi
+
+  if k get deployment traefik -n traefik >/dev/null 2>&1; then
+    k rollout restart deployment/traefik -n traefik >/dev/null 2>&1 || true
+    wait_for_deployment traefik traefik 180
+  fi
+  log "TLS certificates ready"
+}
+
+install_cert_manager() {
+  if [[ "${ENABLE_LETSENCRYPT:-no}" != "yes" ]]; then
+    return 0
+  fi
+
+  local share="${SHARE:-/usr/share/himosoft-k3s-server}"
+  local chart_version="${CERT_MANAGER_CHART_VERSION:-}"
+
+  if k get deployment cert-manager -n cert-manager >/dev/null 2>&1 \
+    && deployment_ready cert-manager cert-manager; then
+    log "cert-manager already running — syncing ClusterIssuer"
+    apply_template "${share}/manifests/cert-manager/cluster-issuer.yaml.template" | k apply -f -
+    return 0
+  fi
+
+  log "Installing cert-manager"
+  ensure_helm
+  helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
+  helm repo update jetstack
+
+  local helm_args=(
+    upgrade --install cert-manager jetstack/cert-manager
+    -n cert-manager --create-namespace
+    --set crds.enabled=true
+    --set prometheus.enabled=false
+  )
+  if [[ -n "${chart_version}" ]]; then
+    helm_args+=(--version "${chart_version}")
+  fi
+
+  if ! helm "${helm_args[@]}" >/dev/null 2>&1; then
+    warn "cert-manager Helm install failed — retrying with verbose output"
+    helm "${helm_args[@]}"
+  fi
+
+  wait_for_deployment cert-manager cert-manager 300
+  wait_for_deployment cert-manager cert-manager-webhook 300
+  wait_for_deployment cert-manager cert-manager-cainjector 300
+
+  apply_template "${share}/manifests/cert-manager/cluster-issuer.yaml.template" | k apply -f -
+  log "cert-manager ready"
 }
 
 # Argo CD install.yaml requires -n argocd; without it workloads land in default.

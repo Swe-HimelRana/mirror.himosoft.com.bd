@@ -27,7 +27,7 @@ Features:
   - Prompts for Let's Encrypt notification email
   - Optional Authelia SSO for Argo CD, Dashboard, and Traefik UI
   - Optional Argo CD install
-  - Real HTTPS via Traefik + Let's Encrypt when DNS is configured
+  - Real HTTPS via cert-manager + Let's Encrypt when DNS is configured
   - Re-run install or bootstrap skips components already installed
 
 Config: /etc/himosoft/k3s-server.conf
@@ -287,7 +287,7 @@ prompt_install_config() {
   echo ""
   echo "Step 5 — Let's Encrypt"
   echo "──────────────────────"
-  echo "Used for Argo CD, Dashboard, and Traefik HTTPS certificates."
+  echo "Used for Let's Encrypt registration (cert-manager)."
   hs_prompt_default ACME_EMAIL "Let's Encrypt email" "admin@${DOMAIN}"
   [[ -n "${ACME_EMAIL}" ]] || { echo "Email is required for Let's Encrypt."; exit 1; }
 
@@ -318,7 +318,7 @@ prompt_install_config() {
   echo "  Traefik Dashboard      : https://${TRAEFIK_FQDN}/dashboard/"
   echo ""
   echo "  K3s version            : ${K3S_VERSION:-latest}"
-  echo "  SSL                    : Let's Encrypt if DNS points to ${PUBLIC_IP}"
+  echo "  SSL                    : cert-manager + Let's Encrypt if DNS points to ${PUBLIC_IP}"
   echo ""
   echo "  DNS — create A records → ${PUBLIC_IP}:"
   if [[ "${INSTALL_AUTHELIA}" == "yes" ]]; then
@@ -403,6 +403,7 @@ print_platform_status() {
 
   echo "  K3s                  : $(platform_state_label "${STATE_K3S}")"
   echo "  Traefik              : $(platform_state_label "${traefik_state}")"
+  echo "  cert-manager         : $(platform_state_label "${STATE_CERT_MANAGER:-missing}")"
   echo "  Authelia             : $(platform_state_label "${authelia_state}")"
   echo "  Argo CD              : $(platform_state_label "${argocd_state}")"
   echo "  Kubernetes Dashboard : $(platform_state_label "${dashboard_state}")"
@@ -659,6 +660,8 @@ cmd_status() {
     k3s kubectl get nodes 2>/dev/null
     echo ""
     k3s kubectl get pods -n traefik 2>/dev/null || true
+    k3s kubectl get pods -n cert-manager 2>/dev/null || true
+    k3s kubectl get certificate -A 2>/dev/null || true
     k3s kubectl get pods -n argocd 2>/dev/null || true
     k3s kubectl get pods -n kubernetes-dashboard 2>/dev/null || true
   fi

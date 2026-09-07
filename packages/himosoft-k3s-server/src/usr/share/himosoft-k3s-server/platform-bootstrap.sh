@@ -68,11 +68,38 @@ install_traefik() {
   fi
   wait_for_deployment traefik traefik 600
   if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
-    log "Traefik ready — obtaining Let's Encrypt certificates (may take 1–2 minutes)"
-    sleep 15
+    log "Traefik ready — cert-manager will obtain Let's Encrypt certificates"
   else
     log "Traefik ready — using default self-signed certificate"
   fi
+}
+
+migrate_traefik_to_certmanager() {
+  if [[ "${ENABLE_LETSENCRYPT:-no}" != "yes" ]]; then
+    return 0
+  fi
+  if ! helm status traefik -n traefik >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local values need_upgrade=no
+  values="$(helm get values traefik -n traefik -o yaml 2>/dev/null || true)"
+  if grep -q 'certificatesResolvers:' <<<"${values}"; then
+    need_upgrade=yes
+    log "Migrating Traefik from native ACME to cert-manager"
+  elif ! grep -A3 'kubernetesIngress:' <<<"${values}" | grep -q 'enabled: true'; then
+    need_upgrade=yes
+    log "Enabling Traefik Ingress provider for cert-manager HTTP-01"
+  fi
+  [[ "${need_upgrade}" == yes ]] || return 0
+
+  ensure_helm
+  write_traefik_values
+  if ! helm upgrade traefik traefik/traefik -n traefik \
+    -f /etc/himosoft/traefik-values.yaml >/dev/null 2>&1; then
+    helm upgrade traefik traefik/traefik -n traefik -f /etc/himosoft/traefik-values.yaml
+  fi
+  wait_for_deployment traefik traefik 600
 }
 
 install_argocd() {
@@ -154,7 +181,7 @@ install_ingressroutes() {
 print_summary() {
   local argocd_pass="" dashboard_token="" ssl_note
   if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
-    ssl_note="Let's Encrypt (trusted HTTPS)"
+    ssl_note="Let's Encrypt via cert-manager (trusted HTTPS)"
   else
     ssl_note="Traefik default cert (browser warning — point DNS then re-run: sudo himosoft-k3s-server bootstrap)"
   fi
@@ -252,6 +279,9 @@ EOF
 }
 
 install_traefik
+migrate_traefik_to_certmanager
+install_cert_manager
+sync_all_tls_certificates
 install_authelia
 install_argocd
 install_k8s_dashboard

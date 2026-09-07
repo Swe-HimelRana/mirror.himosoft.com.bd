@@ -1,3 +1,11 @@
+himosoft-k3s-server (1.5.0) stable; urgency=medium
+
+  * TLS via cert-manager + Let's Encrypt (replaces Traefik native ACME)
+  * ClusterIssuer with HTTP-01; Certificate per hostname; IngressRoute secretName
+  * Auto-migrate existing Traefik ACME installs to cert-manager
+
+ -- Himosoft <admin@himosoft.com.bd>  Mon, 08 Sep 2026 23:15:00 +0600
+
 himosoft-k3s-server (1.4.3) stable; urgency=medium
 
   * Traefik ACME: initContainer + fsGroup fix acme.json permissions on restart
