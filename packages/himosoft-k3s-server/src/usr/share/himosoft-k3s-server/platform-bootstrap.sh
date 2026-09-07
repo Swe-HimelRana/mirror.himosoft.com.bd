@@ -30,6 +30,8 @@ ARGOCD_MANIFEST="https://raw.githubusercontent.com/argoproj/argo-cd/stable/manif
 DASHBOARD_MANIFEST="https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml"
 TRAEFIK_CHART_VERSION="${TRAEFIK_CHART_VERSION:-}"
 
+wait_for_coredns
+
 install_traefik() {
   if [[ "${SKIP_TRAEFIK:-no}" == "yes" ]]; then
     log "Traefik already installed — skipping (declined reconfigure or unchanged)"
@@ -55,14 +57,16 @@ install_traefik() {
     upgrade --install traefik traefik/traefik
     -n traefik --create-namespace
     -f /etc/himosoft/traefik-values.yaml
-    --wait --timeout 10m
   )
   if [[ -n "${TRAEFIK_CHART_VERSION}" ]]; then
     helm_args+=(--version "${TRAEFIK_CHART_VERSION}")
   fi
 
-  helm "${helm_args[@]}"
-  wait_for_deployment traefik traefik 300
+  if ! helm "${helm_args[@]}" >/dev/null 2>&1; then
+    warn "Helm upgrade failed — retrying with verbose output"
+    helm "${helm_args[@]}"
+  fi
+  wait_for_deployment traefik traefik 600
   if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
     log "Traefik ready — obtaining Let's Encrypt certificates (may take 1–2 minutes)"
     sleep 15

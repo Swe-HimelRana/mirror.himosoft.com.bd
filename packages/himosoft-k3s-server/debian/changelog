@@ -1,3 +1,19 @@
+himosoft-k3s-server (1.4.3) stable; urgency=medium
+
+  * Traefik ACME: initContainer + fsGroup fix acme.json permissions on restart
+  * Silent deployment waits — no kubectl rollout spam (prevents SSH disconnects)
+  * Helm upgrades use quiet polling instead of --wait
+
+ -- Himosoft <admin@himosoft.com.bd>  Mon, 08 Sep 2026 22:45:00 +0600
+
+himosoft-k3s-server (1.4.2) stable; urgency=medium
+
+  * Fix Authelia CrashLoop on fresh install — wait for CoreDNS and Redis before start
+  * Redis init container + short service name; fail fast on CrashLoopBackOff
+  * Progress bar during long deployment and statefulset waits
+
+ -- Himosoft <admin@himosoft.com.bd>  Mon, 08 Sep 2026 22:05:00 +0600
+
 himosoft-k3s-server (1.4.1) stable; urgency=medium
 
   * Step 0: Himosoft Terms of Service and Privacy Policy acceptance before setup

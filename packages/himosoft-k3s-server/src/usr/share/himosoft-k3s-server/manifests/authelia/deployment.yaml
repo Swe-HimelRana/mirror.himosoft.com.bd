@@ -28,6 +28,20 @@ spec:
         app: authelia
     spec:
       enableServiceLinks: false
+      initContainers:
+        - name: wait-redis
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Redis at authelia-redis:6379..."
+              until nc -z authelia-redis 6379; do
+                echo "  redis not ready — retrying in 3s"
+                sleep 3
+              done
+              echo "Redis is up — starting Authelia"
+              sleep 5
       containers:
         - name: authelia
           image: authelia/authelia:4.38.5

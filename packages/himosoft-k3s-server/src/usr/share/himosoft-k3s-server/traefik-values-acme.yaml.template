@@ -1,8 +1,26 @@
 # Let's Encrypt via Traefik ACME (appended when DNS is verified).
+# acme.json must stay mode 0600 — initContainer fixes permissions after PVC mount.
 persistence:
   enabled: true
   path: /data
   size: 128Mi
+
+podSecurityContext:
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+
+deployment:
+  replicas: 1
+  initContainers:
+    - name: volume-permissions
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - touch /data/acme.json && chmod 600 /data/acme.json
+      volumeMounts:
+        - name: data
+          mountPath: /data
 
 certificatesResolvers:
   letsencrypt:

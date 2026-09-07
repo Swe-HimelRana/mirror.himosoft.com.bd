@@ -12,6 +12,23 @@ log() {
   echo "==> $*"
 }
 
+print_wait_progress() {
+  local elapsed=$1 max=$2 label=$3
+  local width=28 pct filled empty bar="" i
+  (( max < 1 )) && max=1
+  pct=$(( elapsed * 100 / max ))
+  (( pct > 100 )) && pct=100
+  filled=$(( pct * width / 100 ))
+  empty=$(( width - filled ))
+  for ((i = 0; i < filled; i++)); do bar+='#'; done
+  for ((i = 0; i < empty; i++)); do bar+='-'; done
+  printf '\r==> [%s] %3d%% (%ds/%ds) %s' "${bar}" "${pct}" "${elapsed}" "${max}" "${label}" >&2
+}
+
+clear_wait_progress() {
+  printf '\r%*s\r' 88 "" >&2
+}
+
 warn() {
   echo "==> WARNING: $*" >&2
 }
@@ -58,68 +75,123 @@ workload_has_fatal_pod() {
     | grep -qE 'CrashLoopBackOff|ImagePullBackOff|ErrImagePull|CreateContainerConfigError'
 }
 
-# Poll until ready; uses wall clock (rollout --timeout does not count toward max_wait incorrectly).
+# Silent readiness check — avoids kubectl rollout status flooding SSH sessions.
+deployment_rollout_complete() {
+  local ns="$1" name="$2"
+  local ready desired updated available generation observed
+  ready="$(k get deployment "${name}" -n "${ns}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)"
+  desired="$(k get deployment "${name}" -n "${ns}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"
+  updated="$(k get deployment "${name}" -n "${ns}" -o jsonpath='{.status.updatedReplicas}' 2>/dev/null || echo 0)"
+  available="$(k get deployment "${name}" -n "${ns}" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)"
+  generation="$(k get deployment "${name}" -n "${ns}" -o jsonpath='{.metadata.generation}' 2>/dev/null || echo 0)"
+  observed="$(k get deployment "${name}" -n "${ns}" -o jsonpath='{.status.observedGeneration}' 2>/dev/null || echo 0)"
+  [[ "${desired:-0}" -ge 1 ]] \
+    && [[ "${ready:-0}" == "${desired}" ]] \
+    && [[ "${updated:-0}" == "${desired}" ]] \
+    && [[ "${available:-0}" == "${desired}" ]] \
+    && [[ "${generation}" == "${observed}" ]]
+}
+
+statefulset_rollout_complete() {
+  local ns="$1" name="$2"
+  local ready desired updated current generation observed
+  ready="$(k get statefulset "${name}" -n "${ns}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)"
+  desired="$(k get statefulset "${name}" -n "${ns}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)"
+  updated="$(k get statefulset "${name}" -n "${ns}" -o jsonpath='{.status.updatedReplicas}' 2>/dev/null || echo 0)"
+  current="$(k get statefulset "${name}" -n "${ns}" -o jsonpath='{.status.currentReplicas}' 2>/dev/null || echo 0)"
+  generation="$(k get statefulset "${name}" -n "${ns}" -o jsonpath='{.metadata.generation}' 2>/dev/null || echo 0)"
+  observed="$(k get statefulset "${name}" -n "${ns}" -o jsonpath='{.status.observedGeneration}' 2>/dev/null || echo 0)"
+  [[ "${desired:-0}" -ge 1 ]] \
+    && [[ "${ready:-0}" == "${desired}" ]] \
+    && [[ "${updated:-0}" == "${desired}" ]] \
+    && [[ "${current:-0}" == "${desired}" ]] \
+    && [[ "${generation}" == "${observed}" ]]
+}
+
+# Poll until ready; silent polling keeps SSH sessions alive without log spam.
 wait_for_deployment() {
   local ns="$1" name="$2" max_wait="${3:-600}"
-  local start now elapsed last_diag=0 remaining
+  local start now elapsed last_heartbeat=0 fatal_count=0
   start="$(date +%s)"
   log "Waiting for deployment/${name} in ${ns} (up to ${max_wait}s, images may take several minutes)..."
   while true; do
     now="$(date +%s)"
     elapsed=$((now - start))
+    print_wait_progress "${elapsed}" "${max_wait}" "${name} in ${ns}"
     if (( elapsed >= max_wait )); then
+      clear_wait_progress
       warn "Timed out after ${max_wait}s waiting for deployment/${name} in ${ns}"
       diagnose_workload "${ns}" "${name}"
       return 1
     fi
     if k get deployment "${name}" -n "${ns}" >/dev/null 2>&1; then
       if workload_has_fatal_pod "${ns}" "${name}"; then
-        warn "Pod for ${name} is in a failed state"
-        diagnose_workload "${ns}" "${name}"
+        (( fatal_count += 1 ))
+        if (( fatal_count >= 2 )); then
+          clear_wait_progress
+          warn "Pod for ${name} is in a failed state — aborting wait"
+          diagnose_workload "${ns}" "${name}"
+          return 1
+        fi
+      else
+        fatal_count=0
       fi
-      remaining=$((max_wait - elapsed))
-      (( remaining < 30 )) && remaining=30
-      if k rollout status "deployment/${name}" -n "${ns}" --timeout="${remaining}s" 2>/dev/null; then
+      if deployment_rollout_complete "${ns}" "${name}"; then
+        clear_wait_progress
         log "deployment/${name} is ready"
         return 0
       fi
-      if (( elapsed - last_diag >= 90 )); then
-        log "Still waiting for ${name}... (${elapsed}s elapsed)"
+      if (( elapsed - last_heartbeat >= 60 )); then
+        clear_wait_progress
+        log "Still waiting for ${name}... (${elapsed}s / ${max_wait}s)"
         k get pods -n "${ns}" 2>/dev/null | grep -E "NAME|${name}" || true
-        last_diag=$elapsed
+        last_heartbeat=$elapsed
       fi
     fi
-    sleep 10
+    sleep 5
   done
 }
 
 wait_for_statefulset() {
   local ns="$1" name="$2" max_wait="${3:-600}"
-  local start now elapsed last_diag=0 remaining
+  local start now elapsed last_heartbeat=0 fatal_count=0
   start="$(date +%s)"
   log "Waiting for statefulset/${name} in ${ns} (up to ${max_wait}s)..."
   while true; do
     now="$(date +%s)"
     elapsed=$((now - start))
+    print_wait_progress "${elapsed}" "${max_wait}" "${name} in ${ns}"
     if (( elapsed >= max_wait )); then
+      clear_wait_progress
       warn "Timed out after ${max_wait}s waiting for statefulset/${name} in ${ns}"
       diagnose_workload "${ns}" "${name}"
       return 1
     fi
     if k get statefulset "${name}" -n "${ns}" >/dev/null 2>&1; then
-      remaining=$((max_wait - elapsed))
-      (( remaining < 30 )) && remaining=30
-      if k rollout status "statefulset/${name}" -n "${ns}" --timeout="${remaining}s" 2>/dev/null; then
+      if workload_has_fatal_pod "${ns}" "${name}"; then
+        (( fatal_count += 1 ))
+        if (( fatal_count >= 2 )); then
+          clear_wait_progress
+          warn "Pod for ${name} is in a failed state — aborting wait"
+          diagnose_workload "${ns}" "${name}"
+          return 1
+        fi
+      else
+        fatal_count=0
+      fi
+      if statefulset_rollout_complete "${ns}" "${name}"; then
+        clear_wait_progress
         log "statefulset/${name} is ready"
         return 0
       fi
-      if (( elapsed - last_diag >= 90 )); then
-        log "Still waiting for ${name}... (${elapsed}s elapsed)"
+      if (( elapsed - last_heartbeat >= 60 )); then
+        clear_wait_progress
+        log "Still waiting for ${name}... (${elapsed}s / ${max_wait}s)"
         k get pods -n "${ns}" 2>/dev/null | grep -E "NAME|${name}" || true
-        last_diag=$elapsed
+        last_heartbeat=$elapsed
       fi
     fi
-    sleep 10
+    sleep 5
   done
 }
 
@@ -133,6 +205,47 @@ deployment_ready() {
 
 k3s_running() {
   command -v k3s >/dev/null 2>&1 && systemctl is-active k3s &>/dev/null
+}
+
+wait_for_coredns() {
+  local i elapsed=0 max_wait=180
+  log "Waiting for cluster DNS (CoreDNS)..."
+  while (( elapsed < max_wait )); do
+    if k get deployment coredns -n kube-system >/dev/null 2>&1 && \
+       deployment_ready kube-system coredns; then
+      clear_wait_progress
+      log "CoreDNS is ready"
+      sleep 3
+      return 0
+    fi
+    print_wait_progress "${elapsed}" "${max_wait}" "CoreDNS"
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+  clear_wait_progress
+  warn "CoreDNS not ready after ${max_wait}s — continuing (DNS may still be starting)"
+}
+
+wait_for_redis_ready() {
+  local ns="${1:-authelia}" max_wait="${2:-180}" elapsed=0
+  log "Waiting for Redis (DNS + TCP) in ${ns}..."
+  while (( elapsed < max_wait )); do
+    if k get endpoints authelia-redis -n "${ns}" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -qE '^[0-9]'; then
+      if k run "redis-wait-$$" -n "${ns}" --rm -i --restart=Never \
+        --image=busybox:1.36 --command -- sh -c "nc -z -w 5 authelia-redis 6379" >/dev/null 2>&1; then
+        clear_wait_progress
+        log "Redis is accepting connections"
+        sleep 5
+        return 0
+      fi
+    fi
+    print_wait_progress "${elapsed}" "${max_wait}" "Redis in ${ns}"
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+  clear_wait_progress
+  warn "Redis connectivity check timed out after ${max_wait}s"
+  return 1
 }
 
 k8s_namespace_exists() {
@@ -568,8 +681,8 @@ EOF
   k apply -f "${share}/manifests/argocd-middleware.yaml"
   apply_template_with_tls "${share}/manifests/ingressroutes-argocd.yaml.template" "${ARGOCD_FQDN}" | k apply -f -
 
-  k rollout restart deployment/argocd-server -n argocd
-  wait_for_deployment argocd argocd-server 300
+  k rollout restart deployment/argocd-server -n argocd >/dev/null 2>&1 || true
+  wait_for_deployment argocd argocd-server 600
 }
 
 apply_dashboard_ingress() {
@@ -587,8 +700,12 @@ upgrade_traefik_dashboard_auth() {
   log "Applying Authelia middleware to Traefik dashboard route"
   ensure_helm
   write_traefik_values
-  helm upgrade traefik traefik/traefik -n traefik \
-    -f /etc/himosoft/traefik-values.yaml --wait --timeout 5m
+  if ! helm upgrade traefik traefik/traefik -n traefik \
+    -f /etc/himosoft/traefik-values.yaml >/dev/null 2>&1; then
+    helm upgrade traefik traefik/traefik -n traefik \
+      -f /etc/himosoft/traefik-values.yaml
+  fi
+  wait_for_deployment traefik traefik 300
 }
 
 install_authelia() {
@@ -621,9 +738,11 @@ install_authelia() {
   fi
 
   log "Installing Authelia SSO (protects Argo CD, Dashboard, Traefik UI)"
+  wait_for_coredns
   k apply -f "${share}/manifests/authelia/namespace.yaml"
   k apply -f "${share}/manifests/authelia/redis.yaml"
   wait_for_deployment authelia authelia-redis 300
+  wait_for_redis_ready authelia 180
 
   if ! k get secret authelia-secrets -n authelia >/dev/null 2>&1; then
     k create secret generic authelia-secrets -n authelia \
