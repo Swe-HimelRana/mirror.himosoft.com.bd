@@ -1,3 +1,10 @@
+himosoft-k3s-server (1.3.10) stable; urgency=medium
+
+  * Fix Authelia CrashLoop: use command+args (entrypoint rejects --config=/path)
+  * Fix password hash capture — silence kubectl stdout so only digest is returned
+
+ -- Himosoft <admin@himosoft.com.bd>  Mon, 08 Sep 2026 14:50:00 +0600
+
 himosoft-k3s-server (1.3.9) stable; urgency=medium
 
   * Fix Authelia pod stuck — set enableServiceLinks: false (required by Authelia)

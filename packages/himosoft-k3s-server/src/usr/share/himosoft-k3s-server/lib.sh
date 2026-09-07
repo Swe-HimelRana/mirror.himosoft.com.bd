@@ -286,9 +286,9 @@ generate_authelia_password_hash() {
     [[ -n "${logs}" ]] && warn "Docker hash attempt failed: ${logs}"
   fi
 
-  k delete job "${job_id}" -n authelia --ignore-not-found --wait=false 2>/dev/null || true
-  k delete secret "${secret_name}" -n authelia --ignore-not-found 2>/dev/null || true
-  k create secret generic "${secret_name}" -n authelia --from-literal=password="${password}"
+  k delete job "${job_id}" -n authelia --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  k delete secret "${secret_name}" -n authelia --ignore-not-found >/dev/null 2>&1 || true
+  k create secret generic "${secret_name}" -n authelia --from-literal=password="${password}" >/dev/null
 
   cat > "${tmp_job}" <<'JOBTMPL'
 apiVersion: batch/v1
@@ -334,27 +334,27 @@ JOBTMPL
     return 1
   fi
 
-  if ! k apply -f "${tmp_job}"; then
+  if ! k apply -f "${tmp_job}" >/dev/null 2>&1; then
     warn "Failed to apply Authelia hash job"
-    k delete secret "${secret_name}" -n authelia --ignore-not-found
+    k delete secret "${secret_name}" -n authelia --ignore-not-found >/dev/null 2>&1 || true
     rm -f "${tmp_job}"
     return 1
   fi
 
-  if ! k wait --for=condition=complete "job/${job_id}" -n authelia --timeout=180s 2>/dev/null; then
+  if ! k wait --for=condition=complete "job/${job_id}" -n authelia --timeout=180s >/dev/null 2>&1; then
     warn "Authelia hash job did not complete — details:"
     k describe job "${job_id}" -n authelia 2>/dev/null | sed -n '/Events:/,$p' || true
     k logs "job/${job_id}" -n authelia 2>&1 || true
-    k delete job "${job_id}" -n authelia --ignore-not-found --wait=false
-    k delete secret "${secret_name}" -n authelia --ignore-not-found
+    k delete job "${job_id}" -n authelia --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    k delete secret "${secret_name}" -n authelia --ignore-not-found >/dev/null 2>&1 || true
     rm -f "${tmp_job}"
     return 1
   fi
 
   logs="$(k logs "job/${job_id}" -n authelia 2>&1 || true)"
   hash="$(printf '%s\n' "${logs}" | extract_authelia_hash)"
-  k delete job "${job_id}" -n authelia --ignore-not-found --wait=false
-  k delete secret "${secret_name}" -n authelia --ignore-not-found
+  k delete job "${job_id}" -n authelia --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  k delete secret "${secret_name}" -n authelia --ignore-not-found >/dev/null 2>&1 || true
   rm -f "${tmp_job}"
 
   if [[ -z "${hash}" ]]; then
