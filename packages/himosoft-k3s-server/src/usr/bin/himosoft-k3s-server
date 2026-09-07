@@ -2,6 +2,10 @@
 set -euo pipefail
 
 CONF="/etc/himosoft/k3s-server.conf"
+TERMS_FILE="/etc/himosoft/terms-accepted"
+TERMS_VERSION="2026-05-20"
+TERMS_URL="https://himosoft.com.bd/terms"
+PRIVACY_URL="https://himosoft.com.bd/privacy"
 SHARE="/usr/share/himosoft-k3s-server"
 # shellcheck source=/dev/null
 source /usr/share/himosoft/lib/interactive.sh
@@ -28,6 +32,84 @@ Features:
 
 Config: /etc/himosoft/k3s-server.conf
 EOF
+}
+
+print_himosoft_branding() {
+  cat <<'EOF'
+
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║                                                                  ║
+  ║   ██╗  ██╗██╗███╗   ███╗ ██████╗ ███████╗ ██████╗ ███████╗████████╗
+  ║   ██║  ██║██║████╗ ████║██╔═══██╗██╔════╝██╔═══██╗██╔════╝╚══██╔══╝
+  ║   ███████║██║██╔████╔██║██║   ██║███████╗██║   ██║█████╗     ██║
+  ║   ██╔══██║██║██║╚██╔╝██║██║   ██║╚════██║██║   ██║██╔══╝     ██║
+  ║   ██║  ██║██║██║ ╚═╝ ██║╚██████╔╝███████║╚██████╔╝██║        ██║
+  ║   ╚═╝  ╚═╝╚═╝╚═╝     ╚═╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝        ╚═╝
+  ║                                                                  ║
+  ║   K3s Server Platform Installer                                  ║
+  ║   Traefik · Authelia SSO · Argo CD · Kubernetes Dashboard        ║
+  ║   mirror.himosoft.com.bd                                         ║
+  ║                                                                  ║
+  ╚══════════════════════════════════════════════════════════════════╝
+
+EOF
+}
+
+terms_already_accepted() {
+  [[ -f "${TERMS_FILE}" ]] || return 1
+  # shellcheck source=/dev/null
+  source "${TERMS_FILE}" 2>/dev/null || return 1
+  [[ "${ACCEPTED_TERMS_VERSION:-}" == "${TERMS_VERSION}" ]]
+}
+
+save_terms_acceptance() {
+  mkdir -p /etc/himosoft
+  cat > "${TERMS_FILE}" <<EOF
+# Himosoft terms acceptance — $(date -Iseconds)
+ACCEPTED_AT="$(date -Iseconds)"
+ACCEPTED_TERMS_VERSION="${TERMS_VERSION}"
+TERMS_URL="${TERMS_URL}"
+PRIVACY_URL="${PRIVACY_URL}"
+EOF
+  chmod 600 "${TERMS_FILE}"
+}
+
+require_terms_acceptance() {
+  if terms_already_accepted; then
+    return 0
+  fi
+
+  print_himosoft_branding
+
+  echo "  Welcome — before setup begins, please review our legal terms."
+  echo ""
+  echo "  ┌─────────────────────────────────────────────────────────────┐"
+  echo "  │  Terms of Service    ${TERMS_URL}"
+  echo "  │  Privacy Policy      ${PRIVACY_URL}"
+  echo "  └─────────────────────────────────────────────────────────────┘"
+  echo ""
+  echo "  By continuing you confirm that you:"
+  echo "    • Have read and agree to the Terms of Service and Privacy Policy"
+  echo "    • Are authorized to install and configure software on this server"
+  echo ""
+  echo "  Step 0 — Legal agreement"
+  echo "  ──────────────────────"
+
+  local reply=""
+  read -r -p "  Accept Himosoft Terms and Privacy Policy? [y/N]: " reply
+  if [[ ! "${reply}" =~ ^[Yy]$ ]]; then
+    echo ""
+    echo "  Installation aborted — acceptance is required to continue."
+    echo "  Review the documents above and run again when ready:"
+    echo "    sudo himosoft-k3s-server install"
+    echo ""
+    exit 0
+  fi
+
+  save_terms_acceptance
+  echo ""
+  echo "  ✓ Terms accepted — continuing setup."
+  echo ""
 }
 
 hs_prompt_default() {
@@ -521,7 +603,7 @@ export_install_vars() {
 cmd_install() {
   hs_require_root
   require_share_files
-  hs_banner "Himosoft K3s Server — interactive setup"
+  require_terms_acceptance
 
   if installation_detected; then
     load_conf 2>/dev/null || true
@@ -538,7 +620,7 @@ cmd_install() {
 cmd_bootstrap() {
   hs_require_root
   require_share_files
-  hs_banner "Platform bootstrap"
+  require_terms_acceptance
 
   if ! command -v k3s >/dev/null 2>&1 || ! systemctl is-active k3s &>/dev/null; then
     echo "K3s is not running. Run: sudo himosoft-k3s-server install"

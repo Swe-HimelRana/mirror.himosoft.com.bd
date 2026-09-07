@@ -46,6 +46,7 @@
   "notes": [
     "Running with no arguments shows help — setup starts only with install",
     "apt install does not run setup automatically",
+    "First install requires accepting Himosoft Terms (https://himosoft.com.bd/terms) and Privacy (https://himosoft.com.bd/privacy)",
     "Login is password-only (one_factor) — no TOTP or mail server required",
     "Re-running install or bootstrap skips components that are already installed",
     "Reconfigure prompts appear only when hostnames or settings change",

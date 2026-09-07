@@ -1,3 +1,10 @@
+himosoft-k3s-server (1.4.1) stable; urgency=medium
+
+  * Step 0: Himosoft Terms of Service and Privacy Policy acceptance before setup
+  * Branded welcome banner; installation aborts if terms are not accepted
+
+ -- Himosoft <admin@himosoft.com.bd>  Mon, 08 Sep 2026 15:30:00 +0600
+
 himosoft-k3s-server (1.4.0) stable; urgency=medium
 
   * No args shows help (install no longer runs by default)
