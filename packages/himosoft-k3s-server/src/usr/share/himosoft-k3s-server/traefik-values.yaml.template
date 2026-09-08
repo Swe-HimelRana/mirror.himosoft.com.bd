@@ -3,7 +3,7 @@ deployment:
   replicas: 1
 
 ingressClass:
-  enabled: false
+@INGRESS_CLASS_BLOCK@
 
 ingressRoute:
   dashboard:
@@ -25,7 +25,7 @@ providers:
     enabled: true
     allowCrossNamespace: true
   kubernetesIngress:
-    enabled: false
+@KUBERNETES_INGRESS_BLOCK@
   kubernetesGateway:
     enabled: false
 

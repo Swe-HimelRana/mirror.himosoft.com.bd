@@ -616,6 +616,29 @@ EOF
   fi
 }
 
+render_traefik_ingress_class_block() {
+  if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
+    cat <<'EOF'
+  enabled: true
+  isDefaultClass: true
+  name: traefik
+EOF
+  else
+    echo "  enabled: false"
+  fi
+}
+
+render_traefik_kubernetes_ingress_block() {
+  if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
+    cat <<'EOF'
+    enabled: true
+    ingressClass: traefik
+EOF
+  else
+    echo "    enabled: false"
+  fi
+}
+
 build_protected_domains_yaml() {
   local -a domains=()
   if [[ "${INSTALL_ARGOCD:-yes}" == "yes" && -n "${ARGOCD_FQDN:-}" ]]; then
@@ -857,13 +880,14 @@ write_traefik_values() {
       fi
     elif [[ "${line}" == *"@TRAEFIK_DASHBOARD_MIDDLEWARES@"* ]]; then
       render_traefik_dashboard_middlewares
+    elif [[ "${line}" == *"@INGRESS_CLASS_BLOCK@"* ]]; then
+      render_traefik_ingress_class_block
+    elif [[ "${line}" == *"@KUBERNETES_INGRESS_BLOCK@"* ]]; then
+      render_traefik_kubernetes_ingress_block
     else
       echo "${line}"
     fi
   done < <(apply_template "${share}/traefik-values.yaml.template") > "${out}"
-  if [[ "${ENABLE_LETSENCRYPT:-no}" == "yes" ]]; then
-    apply_template "${share}/traefik-values-certmanager.yaml.template" >> "${out}"
-  fi
   chmod 600 "${out}"
 }
 

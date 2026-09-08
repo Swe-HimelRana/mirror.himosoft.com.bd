@@ -1,10 +1,2 @@
-# cert-manager HTTP-01 challenges use standard Ingress resources (not IngressRoute).
-ingressClass:
-  enabled: true
-  isDefaultClass: true
-  name: traefik
-
-providers:
-  kubernetesIngress:
-    enabled: true
-    ingressClass: traefik
+# cert-manager HTTP-01 settings are merged into traefik-values.yaml.template
+# via @INGRESS_CLASS_BLOCK@ and @KUBERNETES_INGRESS_BLOCK@ (see write_traefik_values).
