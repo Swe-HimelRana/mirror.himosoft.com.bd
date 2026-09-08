@@ -1,3 +1,16 @@
+himosoft-k3s-server (1.6.1) stable; urgency=medium
+
+  * authelia subcommands exit early when Authelia SSO was not configured at install
+
+ -- Himosoft <admin@himosoft.com.bd>  Wed, 10 Sep 2026 01:20:00 +0600
+
+himosoft-k3s-server (1.6.0) stable; urgency=medium
+
+  * Authelia user management CLI: add-user, user-email, suspend-user, delete-user, list-users
+  * Admin password sync preserves other Authelia users in users_database.yml
+
+ -- Himosoft <admin@himosoft.com.bd>  Wed, 10 Sep 2026 01:15:00 +0600
+
 himosoft-k3s-server (1.5.7) stable; urgency=medium
 
   * Fix Authelia admin login failing after install (password hash mismatch)

@@ -20,6 +20,7 @@ Usage:
   himosoft-k3s-server bootstrap        Platform only (K3s must already run)
   himosoft-k3s-server status           Cluster, URLs, and pod summary
   himosoft-k3s-server credentials      Passwords and dashboard token
+  himosoft-k3s-server authelia         Manage Authelia SSO users (add, list, suspend, delete)
 
 Features:
   - Auto-detects public IP (Enter to accept)
@@ -32,6 +33,134 @@ Features:
 
 Config: /etc/himosoft/k3s-server.conf
 EOF
+}
+
+authelia_usage() {
+  cat <<'EOF'
+Authelia user management (file backend — no web admin UI)
+
+Usage:
+  himosoft-k3s-server authelia add-user [username]     Create a user (prompts if omitted)
+  himosoft-k3s-server authelia user-email <username>   Show email stored for a user
+  himosoft-k3s-server authelia suspend-user <username>   Disable login (keeps account)
+  himosoft-k3s-server authelia delete-user <username>    Remove user permanently
+  himosoft-k3s-server authelia list-users            List all users, emails, and status
+  himosoft-k3s-server authelia help                  Show this help
+
+Notes:
+  - Users are stored in the authelia-users secret (users_database.yml)
+  - New users join the admins group (access to Argo CD, Dashboard, Traefik UI)
+  - At least one active user must always remain
+  - Requires Authelia installed and K3s running
+EOF
+}
+
+require_k3s_running() {
+  if ! command -v k3s >/dev/null 2>&1 || ! systemctl is-active k3s &>/dev/null; then
+    echo "K3s is not running." >&2
+    exit 1
+  fi
+}
+
+require_authelia_configured() {
+  load_conf 2>/dev/null || true
+  if [[ "${INSTALL_AUTHELIA:-yes}" != "yes" || -z "${AUTH_FQDN:-}" ]]; then
+    echo "Authelia is not configured." >&2
+    exit 1
+  fi
+}
+
+cmd_authelia_add_user() {
+  local username="${1:-}" email="" password="" confirm="" displayname=""
+  # shellcheck source=/dev/null
+  source "${SHARE}/lib.sh"
+
+  if [[ -z "${username}" ]]; then
+    hs_prompt_default username "Authelia username"
+  fi
+  authelia_valid_username "${username}" || {
+    echo "Invalid username — use letters, numbers, underscore, hyphen only." >&2
+    exit 1
+  }
+
+  while true; do
+    hs_prompt_secret password "Password for ${username}"
+    [[ -n "${password}" ]] || { echo "Password is required."; continue; }
+    hs_prompt_secret confirm "Confirm password"
+    if [[ "${password}" == "${confirm}" ]]; then
+      break
+    fi
+    echo "Passwords do not match — try again."
+  done
+
+  load_conf 2>/dev/null || true
+  hs_prompt_default email "Email (label only — no mail sent)" "user@${DOMAIN:-example.com}"
+  hs_prompt_default displayname "Display name" "${username}"
+
+  authelia_user_add "${username}" "${email}" "${password}" "${displayname}"
+  echo ""
+  echo "User '${username}' can sign in at: https://${AUTH_FQDN:-auth.<domain>}/"
+}
+
+cmd_authelia_user_email() {
+  local username="${1:-}"
+  # shellcheck source=/dev/null
+  source "${SHARE}/lib.sh"
+  [[ -n "${username}" ]] || { echo "Usage: himosoft-k3s-server authelia user-email <username>" >&2; exit 1; }
+  authelia_user_show_email "${username}"
+}
+
+cmd_authelia_suspend_user() {
+  local username="${1:-}"
+  # shellcheck source=/dev/null
+  source "${SHARE}/lib.sh"
+  [[ -n "${username}" ]] || { echo "Usage: himosoft-k3s-server authelia suspend-user <username>" >&2; exit 1; }
+  if ! hs_confirm "Suspend Authelia user '${username}'?"; then
+    echo "Aborted."
+    exit 0
+  fi
+  authelia_user_suspend "${username}"
+}
+
+cmd_authelia_delete_user() {
+  local username="${1:-}"
+  # shellcheck source=/dev/null
+  source "${SHARE}/lib.sh"
+  [[ -n "${username}" ]] || { echo "Usage: himosoft-k3s-server authelia delete-user <username>" >&2; exit 1; }
+  if ! hs_confirm "Permanently delete Authelia user '${username}'?"; then
+    echo "Aborted."
+    exit 0
+  fi
+  authelia_user_delete "${username}"
+}
+
+cmd_authelia_list_users() {
+  # shellcheck source=/dev/null
+  source "${SHARE}/lib.sh"
+  authelia_user_list
+}
+
+cmd_authelia() {
+  hs_require_root
+  require_share_files
+  require_authelia_configured
+  require_k3s_running
+
+  local sub="${2:-help}"
+  case "${sub}" in
+    add-user) shift 2; cmd_authelia_add_user "${1:-}" ;;
+    user-email) shift 2; cmd_authelia_user_email "${1:-}" ;;
+    suspend-user) shift 2; cmd_authelia_suspend_user "${1:-}" ;;
+    delete-user) shift 2; cmd_authelia_delete_user "${1:-}" ;;
+    list-users) cmd_authelia_list_users ;;
+    help|-h|--help) authelia_usage ;;
+    *)
+      echo "Unknown authelia command: ${sub}" >&2
+      echo "" >&2
+      authelia_usage
+      exit 1
+      ;;
+  esac
 }
 
 print_himosoft_branding() {
@@ -675,6 +804,7 @@ cmd_credentials() {
     echo "Authelia — https://${AUTH_FQDN}"
     echo "  Username: ${AUTHELIA_ADMIN_USER:-admin}"
     echo "  Use the password you set at install (password-only login; TOTP disabled)"
+    echo "  Manage users: sudo himosoft-k3s-server authelia help"
     echo "  Authelia codes (filesystem notifier, no SMTP):"
     echo "    sudo k3s kubectl exec -n authelia deploy/authelia -- cat /data/notification.txt"
     echo ""
@@ -708,6 +838,7 @@ main() {
     bootstrap) cmd_bootstrap ;;
     status) cmd_status ;;
     credentials) cmd_credentials ;;
+    authelia) cmd_authelia "$@" ;;
     help|-h|--help) usage ;;
     *) echo "Unknown command: $1" >&2; echo "" >&2; usage; exit 1 ;;
   esac

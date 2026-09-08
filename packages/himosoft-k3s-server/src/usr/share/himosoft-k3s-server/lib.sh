@@ -765,30 +765,306 @@ sync_authelia_users_secret() {
   : "${AUTHELIA_ADMIN_PASSWORD:?AUTHELIA_ADMIN_PASSWORD not set}"
   : "${AUTHELIA_ADMIN_EMAIL:?AUTHELIA_ADMIN_EMAIL not set}"
 
-  local hash tmp_users="/tmp/authelia-users-$$.yml"
+  local hash db tmp_out
   log "Updating Authelia admin user..."
   hash="$(generate_authelia_password_hash "${AUTHELIA_ADMIN_PASSWORD}")" || {
     echo "Failed to hash Authelia password — see warnings above for job output." >&2
     return 1
   }
 
-  cat > "${tmp_users}" <<EOF
-users:
-  ${AUTHELIA_ADMIN_USER}:
+  db="$(authelia_users_work_file)"
+  tmp_out="$(authelia_users_work_file)"
+  if k get secret "$(authelia_users_secret_name)" -n authelia >/dev/null 2>&1; then
+    authelia_fetch_users_db "${db}"
+  else
+    echo "users:" > "${db}"
+  fi
+
+  authelia_upsert_user_in_file "${db}" "${AUTHELIA_ADMIN_USER}" \
+    "${AUTHELIA_ADMIN_DISPLAY_NAME:-Admin}" "${hash}" "${AUTHELIA_ADMIN_EMAIL}" "${tmp_out}"
+
+  k create secret generic authelia-users -n authelia \
+    --from-file=users_database.yml="${tmp_out}" \
+    --dry-run=client -o yaml | k apply -f -
+  rm -f "${db}" "${tmp_out}"
+}
+
+# --- Authelia file-backend user management (users_database.yml in secret authelia-users) ---
+
+authelia_users_secret_name() {
+  echo "authelia-users"
+}
+
+authelia_users_require_ready() {
+  if ! authelia_enabled; then
+    echo "Authelia is not configured." >&2
+    return 1
+  fi
+  if ! k get deployment authelia -n authelia >/dev/null 2>&1; then
+    echo "Authelia is not installed. Run: sudo himosoft-k3s-server install" >&2
+    return 1
+  fi
+  if ! k get secret "$(authelia_users_secret_name)" -n authelia >/dev/null 2>&1; then
+    echo "Authelia users secret not found." >&2
+    return 1
+  fi
+  return 0
+}
+
+authelia_valid_username() {
+  [[ "${1:-}" =~ ^[a-zA-Z0-9_-]+$ ]]
+}
+
+authelia_fetch_users_db() {
+  local dest="$1"
+  k get secret "$(authelia_users_secret_name)" -n authelia \
+    -o "jsonpath={.data.users_database\.yml}" | base64 -d > "${dest}"
+}
+
+authelia_apply_users_db() {
+  local src="$1"
+  k create secret generic "$(authelia_users_secret_name)" -n authelia \
+    --from-file=users_database.yml="${src}" \
+    --dry-run=client -o yaml | k apply -f -
+  if k get deployment authelia -n authelia >/dev/null 2>&1; then
+    k rollout restart deployment/authelia -n authelia >/dev/null 2>&1 || true
+    wait_for_deployment authelia authelia 600
+  fi
+}
+
+authelia_user_exists_in_file() {
+  local file="$1" user="$2"
+  grep -qE "^  ${user}:$" "${file}"
+}
+
+authelia_list_usernames_in_file() {
+  local file="$1"
+  awk '/^users:/{next} /^  [a-zA-Z0-9_-]+:$/ { gsub(/:$/, "", $1); print $1 }' "${file}"
+}
+
+authelia_user_email_from_file() {
+  local file="$1" user="$2"
+  awk -v u="${user}" '
+    $0 ~ "^  " u ":$" { found=1; next }
+    found && /^  [a-zA-Z0-9_-]+:$/ { exit }
+    found && /^    email:/ {
+      line=$0
+      sub(/^    email: */, "", line)
+      gsub(/^"/, "", line)
+      gsub(/"$/, "", line)
+      print line
+      exit
+    }
+  ' "${file}"
+}
+
+authelia_user_disabled_in_file() {
+  local file="$1" user="$2"
+  awk -v u="${user}" '
+    $0 ~ "^  " u ":$" { found=1; next }
+    found && /^  [a-zA-Z0-9_-]+:$/ { exit }
+    found && /^    disabled:/ { print ($2 == "true"); exit }
+  ' "${file}"
+}
+
+authelia_count_active_users_in_file() {
+  local file="$1"
+  awk '
+    /^  [a-zA-Z0-9_-]+:$/ { user=$1; gsub(/:$/, "", user); disabled[user]=0 }
+    /^    disabled: true/ { if (user != "") disabled[user]=1 }
+    END { n=0; for (u in disabled) if (!disabled[u]) n++; print n+0 }
+  ' "${file}"
+}
+
+authelia_write_user_block() {
+  local username="$1" displayname="$2" hash="$3" email="$4"
+  cat <<EOF
+  ${username}:
     disabled: false
-    displayname: "${AUTHELIA_ADMIN_DISPLAY_NAME:-Admin}"
-EOF
-  printf '    password: "%s"\n' "${hash}" >> "${tmp_users}"
-  cat >> "${tmp_users}" <<EOF
-    email: "${AUTHELIA_ADMIN_EMAIL}"
+    displayname: "${displayname}"
+    password: "$(printf '%s' "${hash}")"
+    email: "${email}"
     groups:
       - admins
 EOF
+}
 
-  k create secret generic authelia-users -n authelia \
-    --from-file=users_database.yml="${tmp_users}" \
-    --dry-run=client -o yaml | k apply -f -
-  rm -f "${tmp_users}"
+authelia_remove_user_from_file() {
+  local infile="$1" user="$2" outfile="$3"
+  awk -v u="${user}" '
+    $0 ~ "^  " u ":$" { skip=1; next }
+    skip && /^  [a-zA-Z0-9_-]+:$/ { skip=0 }
+    !skip { print }
+  ' "${infile}" > "${outfile}"
+}
+
+authelia_set_user_disabled_in_file() {
+  local infile="$1" user="$2" disabled="$3" outfile="$4"
+  awk -v u="${user}" -v dis="${disabled}" '
+    $0 ~ "^  " u ":$" { inuser=1; print; next }
+    inuser && /^  [a-zA-Z0-9_-]+:$/ { inuser=0 }
+    inuser && /^    disabled:/ {
+      print "    disabled: " dis
+      next
+    }
+    { print }
+  ' "${infile}" > "${outfile}"
+}
+
+authelia_upsert_user_in_file() {
+  local infile="$1" username="$2" displayname="$3" hash="$4" email="$5" outfile="$6"
+  local tmp_strip="/tmp/authelia-strip-$$.yml"
+  if authelia_user_exists_in_file "${infile}" "${username}"; then
+    authelia_remove_user_from_file "${infile}" "${username}" "${tmp_strip}"
+    infile="${tmp_strip}"
+  fi
+  if grep -q '^users:' "${infile}"; then
+    cp "${infile}" "${outfile}"
+  else
+    echo "users:" > "${outfile}"
+  fi
+  authelia_write_user_block "${username}" "${displayname}" "${hash}" "${email}" >> "${outfile}"
+  rm -f "${tmp_strip}"
+}
+
+authelia_users_work_file() {
+  mktemp /tmp/authelia-users-XXXXXX.yml
+}
+
+authelia_user_add() {
+  local username="$1" email="$2" password="$3" displayname="${4:-}"
+  local hash db tmp_out
+
+  authelia_users_require_ready || return 1
+  authelia_valid_username "${username}" || {
+    echo "Invalid username — use letters, numbers, underscore, hyphen only." >&2
+    return 1
+  }
+  [[ -n "${email}" ]] || { echo "Email is required." >&2; return 1; }
+  [[ -n "${password}" ]] || { echo "Password is required." >&2; return 1; }
+
+  displayname="${displayname:-${username}}"
+  hash="$(generate_authelia_password_hash "${password}")" || return 1
+
+  db="$(authelia_users_work_file)"
+  tmp_out="$(authelia_users_work_file)"
+  authelia_fetch_users_db "${db}"
+  if authelia_user_exists_in_file "${db}" "${username}"; then
+    echo "User '${username}' already exists." >&2
+    rm -f "${db}" "${tmp_out}"
+    return 1
+  fi
+
+  authelia_upsert_user_in_file "${db}" "${username}" "${displayname}" "${hash}" "${email}" "${tmp_out}"
+  authelia_apply_users_db "${tmp_out}"
+  rm -f "${db}" "${tmp_out}"
+  log "Authelia user '${username}' created"
+}
+
+authelia_user_show_email() {
+  local username="$1" db email disabled
+
+  authelia_users_require_ready || return 1
+  [[ -n "${username}" ]] || { echo "Username is required." >&2; return 1; }
+
+  db="$(authelia_users_work_file)"
+  authelia_fetch_users_db "${db}"
+  if ! authelia_user_exists_in_file "${db}" "${username}"; then
+    echo "User '${username}' not found." >&2
+    rm -f "${db}"
+    return 1
+  fi
+
+  email="$(authelia_user_email_from_file "${db}" "${username}")"
+  disabled="$(authelia_user_disabled_in_file "${db}" "${username}")"
+  rm -f "${db}"
+
+  echo "${email}"
+  [[ "${disabled}" == "1" ]] && echo "(account suspended)" >&2
+}
+
+authelia_user_suspend() {
+  local username="$1" db tmp_out active
+
+  authelia_users_require_ready || return 1
+  [[ -n "${username}" ]] || { echo "Username is required." >&2; return 1; }
+
+  db="$(authelia_users_work_file)"
+  tmp_out="$(authelia_users_work_file)"
+  authelia_fetch_users_db "${db}"
+  if ! authelia_user_exists_in_file "${db}" "${username}"; then
+    echo "User '${username}' not found." >&2
+    rm -f "${db}" "${tmp_out}"
+    return 1
+  fi
+  if [[ "$(authelia_user_disabled_in_file "${db}" "${username}")" == "1" ]]; then
+    echo "User '${username}' is already suspended." >&2
+    rm -f "${db}" "${tmp_out}"
+    return 1
+  fi
+
+  active="$(authelia_count_active_users_in_file "${db}")"
+  if (( active <= 1 )); then
+    echo "Cannot suspend '${username}' — at least one active user must remain." >&2
+    rm -f "${db}" "${tmp_out}"
+    return 1
+  fi
+
+  authelia_set_user_disabled_in_file "${db}" "${username}" "true" "${tmp_out}"
+  authelia_apply_users_db "${tmp_out}"
+  rm -f "${db}" "${tmp_out}"
+  log "Authelia user '${username}' suspended"
+}
+
+authelia_user_delete() {
+  local username="$1" db tmp_out active
+
+  authelia_users_require_ready || return 1
+  [[ -n "${username}" ]] || { echo "Username is required." >&2; return 1; }
+
+  db="$(authelia_users_work_file)"
+  tmp_out="$(authelia_users_work_file)"
+  authelia_fetch_users_db "${db}"
+  if ! authelia_user_exists_in_file "${db}" "${username}"; then
+    echo "User '${username}' not found." >&2
+    rm -f "${db}" "${tmp_out}"
+    return 1
+  fi
+
+  if [[ "$(authelia_user_disabled_in_file "${db}" "${username}")" != "1" ]]; then
+    active="$(authelia_count_active_users_in_file "${db}")"
+    if (( active <= 1 )); then
+      echo "Cannot delete '${username}' — at least one active user must remain." >&2
+      rm -f "${db}" "${tmp_out}"
+      return 1
+    fi
+  fi
+
+  authelia_remove_user_from_file "${db}" "${username}" "${tmp_out}"
+  authelia_apply_users_db "${tmp_out}"
+  rm -f "${db}" "${tmp_out}"
+  log "Authelia user '${username}' deleted"
+}
+
+authelia_user_list() {
+  local db user email status
+
+  authelia_users_require_ready || return 1
+  db="$(authelia_users_work_file)"
+  authelia_fetch_users_db "${db}"
+
+  echo "Authelia users (from users_database.yml):"
+  while IFS= read -r user; do
+    [[ -n "${user}" ]] || continue
+    email="$(authelia_user_email_from_file "${db}" "${user}")"
+    if [[ "$(authelia_user_disabled_in_file "${db}" "${user}")" == "1" ]]; then
+      status="suspended"
+    else
+      status="active"
+    fi
+    printf "  %-20s %-30s %s\n" "${user}" "${email}" "${status}"
+  done < <(authelia_list_usernames_in_file "${db}")
+  rm -f "${db}"
 }
 
 apply_template_ingress() {
