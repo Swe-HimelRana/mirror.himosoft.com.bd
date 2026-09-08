@@ -1,3 +1,10 @@
+himosoft-k3s-server (1.5.5) stable; urgency=medium
+
+  * Fix fresh install aborting at progress init (arithmetic false under set -e)
+  * Progress bar shows Complete only on successful exit; clears line on failure
+
+ -- Himosoft <admin@himosoft.com.bd>  Tue, 09 Sep 2026 17:30:00 +0600
+
 himosoft-k3s-server (1.5.4) stable; urgency=medium
 
   * Fix unbound INSTALL_PROGRESS_CURRENT_WEIGHT crash under set -u
