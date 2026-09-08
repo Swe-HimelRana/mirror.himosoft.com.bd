@@ -652,25 +652,37 @@ build_protected_domains_yaml() {
 }
 
 extract_authelia_hash() {
-  grep -oE '\$argon2[^[:space:]]+' | head -1
+  sed -n 's/.*Digest: //p' | head -1 | tr -d '\r'
 }
 
 generate_authelia_password_hash() {
   local password="$1" hash="" tmp_job="" job_id secret_name logs=""
-  job_id="authelia-hash-$$"
-  secret_name="${job_id}-pw"
-  tmp_job="/tmp/${job_id}.yaml"
+
+  if k get deployment authelia -n authelia >/dev/null 2>&1; then
+    logs="$(k exec -n authelia deploy/authelia -- \
+      authelia crypto hash generate argon2 --password "${password}" --no-confirm 2>&1 || true)"
+    hash="$(printf '%s\n' "${logs}" | extract_authelia_hash)"
+    if [[ -n "${hash}" ]]; then
+      printf '%s' "${hash}"
+      return 0
+    fi
+    [[ -n "${logs}" ]] && warn "Authelia pod hash attempt failed: ${logs}"
+  fi
 
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     logs="$(docker run --rm docker.io/authelia/authelia:4.38.5 \
       authelia crypto hash generate argon2 --password "${password}" --no-confirm 2>&1 || true)"
     hash="$(printf '%s\n' "${logs}" | extract_authelia_hash)"
     if [[ -n "${hash}" ]]; then
-      echo "${hash}"
+      printf '%s' "${hash}"
       return 0
     fi
     [[ -n "${logs}" ]] && warn "Docker hash attempt failed: ${logs}"
   fi
+
+  job_id="authelia-hash-$$"
+  secret_name="${job_id}-pw"
+  tmp_job="/tmp/${job_id}.yaml"
 
   k delete job "${job_id}" -n authelia --ignore-not-found --wait=false >/dev/null 2>&1 || true
   k delete secret "${secret_name}" -n authelia --ignore-not-found >/dev/null 2>&1 || true
@@ -691,15 +703,11 @@ spec:
       containers:
         - name: hash
           image: docker.io/authelia/authelia:4.38.5
+          command: ["/bin/sh", "-ec"]
           args:
-            - authelia
-            - crypto
-            - hash
-            - generate
-            - argon2
-            - --password
-            - file:/secrets/password
-            - --no-confirm
+            - |
+              authelia crypto hash generate argon2 \
+                --password "$(cat /secrets/password)" --no-confirm
           volumeMounts:
             - name: password
               mountPath: /secrets
@@ -749,7 +757,7 @@ JOBTMPL
     return 1
   fi
 
-  echo "${hash}"
+  printf '%s' "${hash}"
 }
 
 sync_authelia_users_secret() {
@@ -769,7 +777,9 @@ users:
   ${AUTHELIA_ADMIN_USER}:
     disabled: false
     displayname: "${AUTHELIA_ADMIN_DISPLAY_NAME:-Admin}"
-    password: "${hash}"
+EOF
+  printf '    password: "%s"\n' "${hash}" >> "${tmp_users}"
+  cat >> "${tmp_users}" <<EOF
     email: "${AUTHELIA_ADMIN_EMAIL}"
     groups:
       - admins
@@ -1253,6 +1263,10 @@ install_authelia() {
   k apply -f "${share}/manifests/authelia/deployment.yaml"
   k rollout status deployment/authelia -n authelia --timeout=600s 2>/dev/null \
     || wait_for_deployment authelia authelia 600
+
+  sync_authelia_users_secret
+  k rollout restart deployment/authelia -n authelia 2>/dev/null || true
+  wait_for_deployment authelia authelia 600
 
   apply_template "${share}/manifests/authelia/middleware-forwardauth.yaml.template" | k apply -f -
   apply_template_ingress "${share}/manifests/authelia/ingressroute.yaml.template" "${AUTH_FQDN}" | k apply -f -

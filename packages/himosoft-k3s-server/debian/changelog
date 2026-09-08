@@ -1,3 +1,10 @@
+himosoft-k3s-server (1.5.7) stable; urgency=medium
+
+  * Fix Authelia admin login failing after install (password hash mismatch)
+  * Hash via running Authelia pod when available; safer job fallback and YAML write
+
+ -- Himosoft <admin@himosoft.com.bd>  Tue, 09 Sep 2026 22:10:00 +0600
+
 himosoft-k3s-server (1.5.6) stable; urgency=medium
 
   * Fix Traefik 404 on dash/acd/traefik when cert-manager is enabled
